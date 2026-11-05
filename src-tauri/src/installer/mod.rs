@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod models;
 pub mod paths;
 pub mod root;
+pub mod runtime;
 pub mod staging;
 pub mod status;
 pub mod workspace;
@@ -27,3 +28,5 @@ pub fn resolve_installer_paths(app: &tauri::AppHandle) -> Result<InstallerPaths,
 
     Ok(InstallerPaths::new(root))
 }
+
+pub mod validate;
