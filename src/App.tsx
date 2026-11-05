@@ -1,49 +1,71 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+interface EnvironmentInfo {
+  operatingSystem: "macos" | "windows";
+  architecture: "arm64" | "x64";
+  clients: {
+    id: string;
+    status: string;
+    detectionMethod: string | null;
+    version: string | null;
+  }[];
+}
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+function App() {
+  const [environment, setEnvironment] = useState<EnvironmentInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    invoke<EnvironmentInfo>("detect_environment")
+      .then((result) => {
+        if (active) setEnvironment(result);
+      })
+      .catch((err: unknown) => {
+        if (active) setError(String(err));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+      <h1>Figcon</h1>
+      <p>Environment diagnostics</p>
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+      {loading && <p>Detecting environment...</p>}
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      {error && <p role="alert">Detection failed: {error}</p>}
+
+      {environment && (
+        <section>
+          <h2>System</h2>
+          <p>Operating system: {environment.operatingSystem}</p>
+          <p>Architecture: {environment.architecture}</p>
+
+          <h2>AI Clients</h2>
+          {environment.clients.length === 0 ? (
+            <p>Client detection not implemented yet.</p>
+          ) : (
+            <ul>
+              {environment.clients.map((client) => (
+                <li key={client.id}>
+                  {client.id}: {client.status}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </main>
   );
 }
