@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    figcon_temp_lib::run()
+    figcon_lib::run();
 }
