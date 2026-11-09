@@ -20,11 +20,29 @@ pub async fn prepare_node_runtime(
     .await
 }
 
-async fn prepare_node_runtime_with_downloader<F>(
+pub(super) async fn prepare_node_runtime_with_downloader<F>(
     paths: &InstallerPaths,
     architecture: &str,
     downloader: F,
 ) -> Result<PathBuf, String>
+where
+    F: for<'a> FnOnce(
+        &'a str,
+        &'a Path,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<(), String>> + 'a>,
+    >,
+{
+    prepare_node_runtime_attempt_with_downloader(paths, architecture, downloader)
+        .await
+        .map(|(runtime, _attempt)| runtime)
+}
+
+pub(super) async fn prepare_node_runtime_attempt_with_downloader<F>(
+    paths: &InstallerPaths,
+    architecture: &str,
+    downloader: F,
+) -> Result<(PathBuf, super::cleanup::StagingAttempt), String>
 where
     F: for<'a> FnOnce(
         &'a str,
@@ -40,17 +58,27 @@ where
     let staging = prepare_installation_workspace(paths)
         .map_err(|_| "Failed to prepare installation workspace")?;
 
-    let result = prepare_in_staging(&staging, architecture, downloader).await;
-
-    if result.is_err() {
-        let _ = std::fs::remove_dir_all(&staging);
+    let attempt = super::cleanup::StagingAttempt::capture(paths, staging)
+        .map_err(|error| format!("Failed to capture staging ownership: {error}"))?;
+    let result = prepare_in_staging(&attempt, architecture, downloader).await;
+    match result {
+        Ok(runtime) => {
+            attempt
+                .verify()
+                .map_err(|error| format!("Staging ownership changed: {error}"))?;
+            Ok((runtime, attempt))
+        }
+        Err(error) => match attempt.cleanup() {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(format!(
+                "{error}; staging cleanup refused or failed: {cleanup}"
+            )),
+        },
     }
-
-    result
 }
 
 async fn prepare_in_staging<F>(
-    staging: &Path,
+    attempt: &super::cleanup::StagingAttempt,
     architecture: &str,
     downloader: F,
 ) -> Result<PathBuf, String>
@@ -62,15 +90,21 @@ where
         Box<dyn std::future::Future<Output = Result<(), String>> + 'a>,
     >,
 {
-    let archive = staging.join("node.tar.gz");
-    let runtime = staging.join("runtime");
+    let archive = attempt.path().join("node.tar.gz");
+    let runtime = attempt.path().join("runtime");
 
     downloader(architecture, &archive).await?;
+    attempt
+        .verify()
+        .map_err(|error| format!("Staging ownership changed: {error}"))?;
 
     extract_node_archive(&archive, &runtime, NODE_VERSION, architecture)?;
 
     validate_node_runtime(&runtime).await?;
 
+    attempt
+        .verify()
+        .map_err(|error| format!("Staging ownership changed: {error}"))?;
     std::fs::remove_file(&archive).map_err(|_| "Failed to remove downloaded archive")?;
 
     Ok(runtime)
@@ -79,6 +113,36 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_attempt_does_not_delete_replacement_staging() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = InstallerPaths::new(temp.path().join("figcon"));
+        let result = prepare_node_runtime_with_downloader(&paths, "arm64", |_, destination| {
+            Box::pin(async move {
+                let attempt = destination.parent().unwrap();
+                std::fs::rename(attempt, attempt.with_extension("original")).unwrap();
+                std::fs::create_dir(attempt).unwrap();
+                std::fs::write(attempt.join("marker"), b"replacement").unwrap();
+                Err("Simulated download failure".into())
+            })
+        })
+        .await;
+        let error = result.unwrap_err();
+        assert!(error.contains("Simulated download failure"));
+        assert!(error.contains("staging cleanup refused or failed"));
+        let replacement = std::fs::read_dir(&paths.staging)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.join("marker").exists())
+            .unwrap();
+        assert_eq!(
+            std::fs::read(replacement.join("marker")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(std::fs::read_dir(&paths.staging).unwrap().count(), 2);
+    }
 
     #[tokio::test]
     async fn rejects_unsupported_architecture_without_creating_workspace() {
@@ -93,6 +157,7 @@ mod tests {
         assert!(!paths.runtime.exists());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn cleans_up_after_failed_download() {
         let temp = tempfile::tempdir().unwrap();
@@ -100,7 +165,9 @@ mod tests {
 
         let staging = prepare_installation_workspace(&paths).unwrap();
 
-        let result = prepare_in_staging(&staging, "arm64", |_architecture, _destination| {
+        let attempt =
+            super::super::cleanup::StagingAttempt::capture(&paths, staging.clone()).unwrap();
+        let result = prepare_in_staging(&attempt, "arm64", |_architecture, _destination| {
             Box::pin(async { Err("Simulated download failure".to_string()) })
         })
         .await;
@@ -113,6 +180,7 @@ mod tests {
         std::fs::remove_dir_all(&staging).unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn automatically_cleans_up_failed_download() {
         let temp = tempfile::tempdir().unwrap();
@@ -141,6 +209,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn automatically_cleans_up_invalid_archive() {
         let temp = tempfile::tempdir().unwrap();
@@ -183,7 +252,7 @@ mod tests {
                         flate2::write::GzEncoder::new(file, flate2::Compression::default());
 
                     let mut archive = tar::Builder::new(encoder);
-                    let contents = format!("#!/bin/sh\necho v{NODE_VERSION}\n");
+                    let contents = super::super::test_support::node_script();
 
                     let mut header = tar::Header::new_gnu();
                     header.set_size(contents.len() as u64);
@@ -198,6 +267,10 @@ mod tests {
                         )
                         .map_err(|error| error.to_string())?;
 
+                    super::super::test_support::append_npm(
+                        &mut archive,
+                        &format!("node-v{NODE_VERSION}-darwin-arm64"),
+                    );
                     let encoder = archive.into_inner().map_err(|error| error.to_string())?;
 
                     encoder.finish().map_err(|error| error.to_string())?;
@@ -210,7 +283,7 @@ mod tests {
 
         assert_eq!(
             std::fs::read(result.join("bin/node")).unwrap(),
-            format!("#!/bin/sh\necho v{NODE_VERSION}\n").as_bytes()
+            super::super::test_support::node_script().as_bytes()
         );
 
         assert!(!result.parent().unwrap().join("node.tar.gz").exists());

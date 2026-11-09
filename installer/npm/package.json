@@ -1,0 +1,9 @@
+{
+  "name": "figcon-managed-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned dependency manifest for Figcon's managed MCP installation",
+  "dependencies": {
+    "figma-console-mcp": "1.46.0"
+  }
+}

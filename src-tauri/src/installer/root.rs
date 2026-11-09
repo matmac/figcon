@@ -7,6 +7,17 @@ pub fn prepare_installation_root(root: &Path) -> io::Result<()> {
     {
         use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 
+        let parent = root
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Installation root must have a parent",
+                )
+            })?;
+        prepare_missing_parents(parent)?;
+
         let mut builder = fs::DirBuilder::new();
         builder.mode(0o700);
 
@@ -52,9 +63,96 @@ pub fn prepare_installation_root(root: &Path) -> io::Result<()> {
     }
 }
 
+// Create absent app-data ancestors privately without changing existing permissions.
+// Existing ancestors may legitimately be shared (e.g. Application Support).
+#[cfg(unix)]
+fn prepare_missing_parents(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Installation parent must be a real directory",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Installation parent is missing",
+                    )
+                })?;
+            prepare_missing_parents(parent)?;
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            match builder.create(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+            let metadata = fs::symlink_metadata(path)?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Installation parent must be a real directory",
+                ));
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn initializes_with_missing_app_data_parents() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let app_data = temp
+            .path()
+            .join("Application Support")
+            .join("ds.academy.figcon");
+        let root = app_data.join("figcon-installer");
+        prepare_installation_root(&root).unwrap();
+        prepare_installation_root(&root).unwrap();
+        for directory in [&app_data, &root] {
+            assert_eq!(
+                fs::metadata(directory).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_parent_without_creating_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let actual = temp.path().join("actual");
+        fs::create_dir(&actual).unwrap();
+        let linked = temp.path().join("linked");
+        std::os::unix::fs::symlink(&actual, &linked).unwrap();
+        assert!(prepare_installation_root(&linked.join("figcon-installer")).is_err());
+        assert_eq!(fs::read_dir(actual).unwrap().count(), 0);
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn unsupported_root_creation_has_no_side_effects() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("missing-parent").join("figcon-installer");
+        assert_eq!(
+            prepare_installation_root(&root).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
 
     #[cfg(unix)]
     #[test]

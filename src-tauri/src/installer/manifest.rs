@@ -2,6 +2,9 @@
 
 pub const NODE_VERSION: &str = "24.22.2";
 pub const MCP_VERSION: &str = "1.46.0";
+pub const MCP_ENTRY_POINT: &str = "dist/local.js";
+pub const MCP_TARBALL: &str =
+    "https://registry.npmjs.org/figma-console-mcp/-/figma-console-mcp-1.46.0.tgz";
 
 pub const NODE_ARM64_SHA256: &str =
     "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a";

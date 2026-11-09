@@ -24,9 +24,30 @@ pub fn resolve_installer_paths(app: &tauri::AppHandle) -> Result<InstallerPaths,
     let root = app
         .path()
         .app_data_dir()
-        .map_err(|error| format!("Cannot resolve application data directory: {error}"))?;
+        .map_err(|error| format!("Cannot resolve application data directory: {error}"))?
+        .join("figcon-installer");
 
     Ok(InstallerPaths::new(root))
 }
 
 pub mod validate;
+
+pub mod activate;
+
+pub mod install;
+
+pub mod mcp;
+mod mcp_contract;
+mod mcp_fs;
+mod npm;
+mod process;
+mod runtime_aliases;
+
+#[cfg(all(test, unix))]
+mod test_support;
+
+#[cfg(all(test, unix))]
+mod node_archive_tests;
+
+#[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
+mod e2e_tests;

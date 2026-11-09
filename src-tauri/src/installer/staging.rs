@@ -23,6 +23,19 @@ pub fn create_staging_directory(staging_root: &Path) -> io::Result<PathBuf> {
         ));
     }
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if root_metadata.uid() != unsafe { libc::geteuid() }
+            || root_metadata.permissions().mode() & 0o777 != 0o700
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Installation root must be owned by the current user with 0700 permissions",
+            ));
+        }
+    }
+
     match fs::symlink_metadata(staging_root) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             return Err(io::Error::new(
@@ -72,7 +85,13 @@ pub fn create_staging_directory(staging_root: &Path) -> io::Result<PathBuf> {
 
         use std::os::unix::fs::MetadataExt;
 
-        let owner = fs::metadata(installation_root)?;
+        let owner = fs::symlink_metadata(installation_root)?;
+        if !owner.is_dir() || owner.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Installation root must be a real directory",
+            ));
+        }
 
         if owner.uid() != unsafe { libc::geteuid() } {
             return Err(io::Error::new(
@@ -118,16 +137,20 @@ pub fn create_staging_directory(staging_root: &Path) -> io::Result<PathBuf> {
             std::process::id()
         ));
 
-        match fs::create_dir(&directory) {
-            Ok(()) => {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
-                }
+        #[cfg(unix)]
+        let creation_result = {
+            use std::os::unix::fs::DirBuilderExt;
 
-                return Ok(directory);
-            }
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(0o700);
+            builder.create(&directory)
+        };
+
+        #[cfg(not(unix))]
+        let creation_result = fs::create_dir(&directory);
+
+        match creation_result {
+            Ok(()) => return Ok(directory),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
         }
@@ -145,11 +168,13 @@ mod tests {
 
     #[test]
     fn creates_distinct_private_directories() {
-        let root = std::env::temp_dir().join(format!(
-            "figcon-staging-test-{}-{}",
-            std::process::id(),
-            NEXT_ID.fetch_add(1, Ordering::Relaxed)
-        ));
+        let temp = tempfile::tempdir().unwrap();
+        let installation_root = temp.path().join("figcon");
+        #[cfg(unix)]
+        super::super::root::prepare_installation_root(&installation_root).unwrap();
+        #[cfg(not(unix))]
+        fs::create_dir(&installation_root).unwrap();
+        let root = installation_root.join("staging");
 
         let first = create_staging_directory(&root).unwrap();
         let second = create_staging_directory(&root).unwrap();

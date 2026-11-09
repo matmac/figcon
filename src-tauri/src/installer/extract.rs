@@ -11,6 +11,9 @@ use tar::Archive;
 const MAX_EXTRACTED_BYTES: u64 = 500 * 1024 * 1024;
 const MAX_ENTRIES: usize = 20_000;
 
+/// Structurally extract an already checksum-verified archive. Production calls
+/// this only after download_node_archive verifies the pinned manifest checksum.
+/// Approved alias headers are recorded, never unpacked directly from the TAR.
 pub fn extract_node_archive(
     archive_path: &Path,
     destination: &Path,
@@ -38,6 +41,8 @@ pub fn extract_node_archive(
         let mut total_bytes = 0u64;
         let mut entry_count = 0usize;
         let mut seen_paths = HashSet::new();
+        let mut regular_paths = HashSet::new();
+        let mut aliases = Vec::new();
 
         for entry in archive.entries().map_err(|_| "Invalid archive")? {
             entry_count += 1;
@@ -125,6 +130,20 @@ pub fn extract_node_archive(
                     fs::set_permissions(&target, fs::Permissions::from_mode(mode & 0o777))
                         .map_err(|_| "Cannot set extracted file permissions")?;
                 }
+                regular_paths.insert(relative);
+            } else if kind.is_symlink() {
+                if entry.size() != 0 {
+                    return Err("Runtime symbolic link must not contain file data".into());
+                }
+                let target = entry
+                    .link_name_bytes()
+                    .ok_or("Missing runtime symbolic link target")?;
+                aliases.push(super::runtime_aliases::from_archive(
+                    entry.path_bytes().as_ref(),
+                    target.as_ref(),
+                    version,
+                    architecture,
+                )?);
             } else {
                 return Err("Unsupported archive entry type".into());
             }
@@ -149,6 +168,13 @@ pub fn extract_node_archive(
                 return Err("Node.js executable lacks execute permission".into());
             }
         }
+
+        for alias in &aliases {
+            if !regular_paths.contains(Path::new(alias.file_target)) {
+                return Err("Runtime alias target was not extracted as a regular file".into());
+            }
+        }
+        super::runtime_aliases::reconstruct(destination, &aliases)?;
 
         Ok(())
     })();
@@ -503,6 +529,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn rejects_node_without_execute_permission() {
         let temp =
