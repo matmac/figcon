@@ -157,7 +157,7 @@ fn rejects_unexpected_targets_names_duplicates_and_missing_targets() {
             super::super::extract::extract_node_archive(&file, &runtime, NODE_VERSION, "arm64")
                 .is_err()
         );
-        assert!(!runtime.exists());
+        assert!(runtime.is_dir(), "Rejected archive staging is retained");
         assert!(!temp.path().join("outside").exists());
     }
     for children in [false, true] {
@@ -179,7 +179,10 @@ fn rejects_unexpected_targets_names_duplicates_and_missing_targets() {
             super::super::extract::extract_node_archive(&file, &runtime, NODE_VERSION, "arm64")
                 .is_err()
         );
-        assert!(!runtime.exists());
+        assert!(
+            runtime.is_dir(),
+            "Populated unsealed extraction remains for manual review"
+        );
     }
 }
 
@@ -232,5 +235,5 @@ fn rejects_alias_headers_with_nonzero_payloads() {
             .unwrap_err()
             .contains("must not contain file data")
     );
-    assert!(!runtime.exists());
+    assert!(runtime.is_dir(), "Rejected archive staging is retained");
 }

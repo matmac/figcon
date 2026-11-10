@@ -96,6 +96,9 @@ async fn real_node_archive_first_run_prepares_and_activates() {
     super::activate::activate_node_runtime(&paths, &runtime)
         .await
         .unwrap();
+    attempt
+        .checkpoint(super::attempt::Lifecycle::Activated)
+        .unwrap();
     attempt.cleanup().unwrap();
     super::validate::validate_node_runtime(&paths.runtime)
         .await
@@ -109,7 +112,7 @@ async fn real_node_archive_first_run_prepares_and_activates() {
             .file_type()
             .is_symlink()
     );
-    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     assert!(!paths.mcp.exists());
 }
 
@@ -129,6 +132,6 @@ async fn real_node_production_network_first_run() {
     super::validate::validate_node_runtime(&paths.runtime)
         .await
         .unwrap();
-    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     assert!(!paths.mcp.exists());
 }

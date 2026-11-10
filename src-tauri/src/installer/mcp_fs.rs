@@ -114,6 +114,7 @@ pub(super) fn validate_tree_with_links(
     let mut entries = 0usize;
     let mut bytes = 0u64;
     while let Some(path) = pending.pop() {
+        super::deadline::check()?;
         entries += 1;
         let metadata = fs::symlink_metadata(&path).map_err(|_| "Cannot inspect installed tree")?;
         if entries > 200_000 {
@@ -148,6 +149,7 @@ pub(super) fn validate_tree_with_links(
             return Err("Installed tree contains an unexpected filesystem entry".into());
         }
     }
+    super::deadline::check()?;
     Ok(())
 }
 
@@ -176,6 +178,7 @@ pub(super) fn validate_installation(root: &Path, lock: &Value) -> Result<(), Str
         .iter()
         .filter(|(p, _)| !p.is_empty())
     {
+        super::deadline::check()?;
         let metadata = real_file(root, &Path::new(path).join("package.json"))?;
         let installed: Value = serde_json::from_slice(&read_regular(&metadata, 1024 * 1024)?)
             .map_err(|_| "Invalid installed package metadata")?;

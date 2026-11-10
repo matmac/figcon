@@ -87,6 +87,25 @@ esac
     }
 
     #[tokio::test]
+    async fn expired_staged_handle_cannot_activate() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = setup(temp.path(), "success");
+        let mut staged = stage_mcp(&paths).await.unwrap();
+        let stage = staged.path().to_path_buf();
+        staged.attempt.as_mut().unwrap().deadline =
+            super::super::super::deadline::Deadline::new(std::time::Duration::ZERO);
+        assert!(
+            staged
+                .activate_async()
+                .await
+                .unwrap_err()
+                .contains("deadline")
+        );
+        assert!(!paths.mcp.exists());
+        assert!(stage.exists());
+    }
+
+    #[tokio::test]
     async fn stages_and_activates_without_executing_mcp() {
         let temp = tempfile::tempdir().unwrap();
         let paths = setup(temp.path(), "success");
@@ -101,7 +120,7 @@ esac
         let discarded = stage_mcp(&paths).await.unwrap();
         discarded.discard().unwrap();
         assert!(staged.path().is_dir());
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 2);
         staged.activate().unwrap();
         assert_eq!(
             super::super::super::status::inspect_installation(&paths).state,
@@ -114,7 +133,7 @@ esac
                 .is_file()
         );
         assert!(!paths.mcp.join("npm-environment").exists());
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 2);
         assert_eq!(fs::read(paths.runtime.join("bin/node")).unwrap(), runtime);
     }
 
@@ -135,12 +154,12 @@ esac
             }
             assert!(stage_mcp(&paths).await.is_err());
             assert!(!paths.mcp.exists());
-            assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+            assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
         }
     }
 
     #[tokio::test]
-    async fn failed_npm_and_invalid_tree_are_cleaned_without_exposing_output() {
+    async fn failed_npm_and_invalid_tree_are_retained_without_exposing_output() {
         for action in ["failed", "invalid-tree"] {
             let temp = tempfile::tempdir().unwrap();
             let paths = setup(temp.path(), action);
@@ -149,7 +168,7 @@ esac
             assert!(!error.contains("SYNTHETIC_SECRET"));
             assert!(!error.contains(temp.path().to_str().unwrap()));
             assert!(!paths.mcp.exists());
-            assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+            assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
         }
     }
 
@@ -163,7 +182,7 @@ esac
         assert!(staged.activate().is_err());
         assert!(stage_mcp(&paths).await.is_err());
         assert_eq!(fs::read(paths.mcp.join("marker")).unwrap(), b"existing");
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     }
 
     #[tokio::test]
@@ -184,6 +203,16 @@ esac
             b"two",
         )
         .unwrap();
+        one.attempt
+            .as_ref()
+            .unwrap()
+            .checkpoint(super::super::super::attempt::Lifecycle::Prepared)
+            .unwrap();
+        two.attempt
+            .as_ref()
+            .unwrap()
+            .checkpoint(super::super::super::attempt::Lifecycle::Prepared)
+            .unwrap();
         let barrier = std::sync::Barrier::new(2);
         let (one, two) = std::thread::scope(|scope| {
             let a = scope.spawn(|| {
@@ -201,7 +230,7 @@ esac
             fs::read(paths.mcp.join("node_modules/figma-console-mcp/dist/winner")).unwrap(),
             if one.is_ok() { b"one" } else { b"two" }
         );
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 2);
     }
 
     #[tokio::test]
@@ -219,8 +248,10 @@ esac
                 result = &mut installation => panic!("Unexpected completion: {}", result.is_ok()),
                 _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
             }
-            let ready = fs::read_dir(&paths.staging)
-                .unwrap()
+            let Ok(entries) = fs::read_dir(&paths.staging) else {
+                continue;
+            };
+            let ready = entries
                 .map(|e| e.unwrap().path().join("mcp"))
                 .find(|p| p.join("ready").exists());
             if let Some(path) = ready {
@@ -258,7 +289,7 @@ esac
             staged
                 .activate()
                 .unwrap_err()
-                .contains("dependency metadata")
+                .contains("durable checkpoint")
         );
         assert!(!paths.mcp.exists());
 
@@ -311,6 +342,6 @@ esac
         install_mcp(&paths).await.unwrap();
         let lock = validate_contract(PACKAGE_JSON, PACKAGE_LOCK).unwrap();
         validate_installation(&paths.mcp, &lock).unwrap();
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     }
 }

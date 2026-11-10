@@ -12,8 +12,13 @@ pub async fn install_node_runtime(
     paths: &InstallerPaths,
     architecture: &str,
 ) -> Result<(), String> {
-    install_node_runtime_with_downloader(paths, architecture, |arch, dest| {
-        Box::pin(super::download::download_node_archive(arch, dest))
+    let paths = paths.clone();
+    let architecture = architecture.to_owned();
+    super::deadline::run(move || async move {
+        install_node_runtime_with_downloader(&paths, &architecture, |arch, dest| {
+            Box::pin(super::download::download_node_archive(arch, dest))
+        })
+        .await
     })
     .await
 }
@@ -36,12 +41,22 @@ where
     attempt
         .verify()
         .map_err(|error| format!("Staging ownership changed: {error}"))?;
+    attempt.verify_checkpoint()?;
+    attempt.state(super::attempt::Lifecycle::Activating)?;
     let activation = activate_node_runtime(paths, &staged_runtime)
         .await
         .map_err(|error| format!("Failed to activate Node.js runtime: {error}"));
+    let activation = activation.and_then(|()| {
+        attempt
+            .checkpoint(super::attempt::Lifecycle::Activated)
+            .map_err(|error| format!("Runtime activated but durable checkpoint failed: {error}"))
+    });
 
     match (activation, attempt.cleanup()) {
-        (result, Ok(())) => result,
+        (Ok(()), Ok(_)) => Ok(()),
+        (Err(error), Ok(_)) => Err(format!(
+            "{error}; staging retained for manual review; automatic cleanup disabled"
+        )),
         (Ok(()), Err(error)) => Err(format!(
             "Runtime activated, but staging cleanup refused or failed: {error}"
         )),
@@ -94,7 +109,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn installs_runtime_and_cleans_staging() {
+    async fn installs_runtime_and_reports_retained_staging() {
         let temp = tempfile::tempdir().unwrap();
         let paths = InstallerPaths::new(temp.path().join("figcon"));
 
@@ -105,7 +120,7 @@ mod tests {
         .unwrap();
 
         assert!(paths.runtime.join("bin/node").is_file());
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
         assert!(!paths.mcp.exists());
     }
 
@@ -132,12 +147,12 @@ mod tests {
             "A valid staged runtime must reach activation"
         );
         assert_eq!(fs::read(paths.runtime.join("marker")).unwrap(), b"existing");
-        assert!(!paths.staging.exists() || fs::read_dir(&paths.staging).unwrap().count() == 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn cleans_up_failed_download() {
+    async fn retains_failed_download_attempt() {
         let temp = tempfile::tempdir().unwrap();
         let paths = InstallerPaths::new(temp.path().join("figcon"));
 
@@ -147,9 +162,13 @@ mod tests {
             })
             .await;
 
-        assert_eq!(result.unwrap_err(), "Simulated download failure");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Simulated download failure; staging retained")
+        );
         assert!(!paths.runtime.exists());
-        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 1);
     }
 
     #[tokio::test]

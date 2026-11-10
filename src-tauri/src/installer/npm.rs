@@ -62,6 +62,7 @@ impl NpmEnvironment {
                 "--package-lock=true",
                 "--registry=https://registry.npmjs.org/",
             ]);
+        super::limits::configure(&mut command);
         Ok(command)
     }
 
