@@ -28,13 +28,16 @@ Assertions cover:
   contains only the private runtime's `bin` directory.
 - `error` for an incomplete active MCP directory, and refusal to overwrite it.
 - Failure injection by emptying `dist/local.js` in a completed owned staging
-  attempt. Activation must refuse it, clean that attempt, and leave Node intact.
+  attempt. Activation must refuse it, report retention, preserve the modified
+  attempt for manual review, and leave Node intact.
 - Recovery through a fresh production MCP installation and `installed` status.
 - Every installed path, including reconstructed aliases, resolves inside the
   isolated managed root.
 - Repeat Node/MCP installation refusal, with unchanged content hashes, inode
   identities, permissions, and symlink targets across the full active trees.
-- Empty staging after completed failure/recovery and repeat attempts.
+- Retained staging after every attempt: three directories after corruption
+  (runtime, version probe, failed MCP) and five after successful MCP plus repeat Node;
+  successful attempts also retain their staging without adopting the modified one.
 
 Reports include only phase/status results and public package/runtime versions,
 not subprocess diagnostics, environment values, or installation paths. A useful
@@ -68,7 +71,10 @@ execution, or Windows support. Installation is not an OS sandbox. Existing
 same-user pathname TOCTOU windows remain between checksum verification,
 extraction, execution, activation, and cleanup; stronger guarantees require
 descriptor-relative operations. A cancelled future retains private staging
-while processes terminate. Automated recovery still needs ownership/liveness
-tracking and must never delete another attempt or overwrite an active install.
-Extraction does not yet enforce a live disk quota, and locked package integrity
+while processes terminate. [Recovery policy](installer-recovery.md) uses durable
+ownership and process identity; unsealed/modified attempts stay for manual review.
+Monitored extraction quotas can overshoot between scans, and locked package integrity
 does not establish publisher trust or complete supply-chain security.
+
+Abandoned attempts are never automatically deleted. Live completed attempts also retain all staging; see [the recovery policy](installer-recovery.md)
+for the cooperative same-user boundary and remaining quota/durability limits.

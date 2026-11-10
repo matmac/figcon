@@ -1,7 +1,7 @@
 use flate2::read::GzDecoder;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io;
+use std::io::{Read, Write};
 use std::path::{Component, Path};
 
 #[cfg(unix)]
@@ -45,6 +45,7 @@ pub fn extract_node_archive(
         let mut aliases = Vec::new();
 
         for entry in archive.entries().map_err(|_| "Invalid archive")? {
+            super::deadline::check()?;
             entry_count += 1;
 
             if entry_count > MAX_ENTRIES {
@@ -116,7 +117,19 @@ pub fn extract_node_archive(
                     .open(&target)
                     .map_err(|_| "Archive file conflicts with an existing path")?;
 
-                io::copy(&mut entry, &mut output).map_err(|_| "Cannot extract archive file")?;
+                let mut buffer = [0u8; 64 * 1024];
+                loop {
+                    super::deadline::check()?;
+                    let count = entry
+                        .read(&mut buffer)
+                        .map_err(|_| "Cannot read archive file")?;
+                    if count == 0 {
+                        break;
+                    }
+                    output
+                        .write_all(&buffer[..count])
+                        .map_err(|_| "Cannot extract archive file")?;
+                }
 
                 drop(output);
 
@@ -179,11 +192,12 @@ pub fn extract_node_archive(
         Ok(())
     })();
 
-    if result.is_err() {
-        let _ = fs::remove_dir_all(destination);
+    if let Err(error) = result {
+        return Err(format!(
+            "{error}; partial extraction retained; automatic cleanup disabled"
+        ));
     }
-
-    result
+    Ok(())
 }
 
 #[cfg(test)]
@@ -277,13 +291,16 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Rejected extraction staging is retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }
 
     #[test]
-    fn rejects_duplicate_paths_and_cleans_up() {
+    fn rejects_duplicate_paths_and_retains_unsealed_partial_data() {
         let temp =
             std::env::temp_dir().join(format!("figcon-duplicate-test-{}", std::process::id()));
 
@@ -316,7 +333,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Unsealed populated extraction must be retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }
@@ -360,7 +380,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Rejected extraction staging is retained"
+        );
         assert!(!escaped_file.exists());
 
         fs::remove_dir_all(temp).unwrap();
@@ -400,7 +423,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Rejected extraction staging is retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }
@@ -439,7 +465,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Unsealed populated extraction must be retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }
@@ -474,7 +503,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Rejected extraction staging is retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }
@@ -523,7 +555,10 @@ mod tests {
             // A root directory entry is structurally valid, but an incomplete
             // Node.js installation must still be rejected.
             assert!(result.is_err());
-            assert!(!destination.exists());
+            assert!(
+                destination.is_dir(),
+                "Rejected extraction staging is retained"
+            );
 
             fs::remove_dir_all(temp).unwrap();
         }
@@ -563,7 +598,10 @@ mod tests {
         let result = extract_node_archive(&archive_path, &destination, "24.22.2", "arm64");
 
         assert!(result.is_err());
-        assert!(!destination.exists());
+        assert!(
+            destination.is_dir(),
+            "Unsealed populated extraction must be retained"
+        );
 
         fs::remove_dir_all(temp).unwrap();
     }

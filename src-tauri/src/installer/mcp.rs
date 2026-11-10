@@ -24,17 +24,47 @@ impl StagedMcp {
         &self.staged
     }
 
-    /// Explicitly abandon a completed staging operation and remove only its
-    /// owned attempt. Cancellation during subprocess execution retains staging.
+    /// Abandon completed staging without deletion. The durable receipt and all
+    /// staging resources remain for manual review; this releases the live lease.
+    pub async fn discard_async(self) -> Result<(), String> {
+        let deadline = self
+            .attempt
+            .as_ref()
+            .ok_or("Missing attempt")?
+            .deadline
+            .clone();
+        super::deadline::run_with(deadline, move || async move { self.discard() }).await
+    }
+
     pub fn discard(mut self) -> Result<(), String> {
         self.attempt
             .take()
             .ok_or("Missing staging ownership")?
             .cleanup()
+            .map(|_| ())
             .map_err(|_| "MCP staging cleanup refused or failed".into())
     }
 
+    /// Use from async callers so validation and sealing stay off their executor.
+    pub async fn activate_async(self) -> Result<(), String> {
+        let deadline = self
+            .attempt
+            .as_ref()
+            .ok_or("Missing attempt")?
+            .deadline
+            .clone();
+        super::deadline::run_with(deadline, move || async move { self.activate() }).await
+    }
+
     pub fn activate(mut self) -> Result<(), String> {
+        let deadline = self
+            .attempt
+            .as_ref()
+            .ok_or("Missing attempt")?
+            .deadline
+            .clone();
+        let _scope = deadline.enter();
+        deadline.check()?;
         let activation = self
             .runtime_guard
             .verify()
@@ -46,7 +76,18 @@ impl StagedMcp {
                     .verify()
                     .map_err(|_| "Staging ownership changed".to_string())
             })
-            .and_then(|()| activate_mcp(&self.paths, &self.staged, &self.lock));
+            .and_then(|()| {
+                let attempt = self.attempt.as_ref().ok_or("Missing attempt ownership")?;
+                super::limits::MCP.check(attempt)?;
+                attempt.verify_checkpoint()?;
+                attempt.state(super::attempt::Lifecycle::Activating)?;
+                activate_mcp(&self.paths, &self.staged, &self.lock)?;
+                attempt
+                    .checkpoint(super::attempt::Lifecycle::Activated)
+                    .map_err(|error| {
+                        format!("MCP activated but durable checkpoint failed: {error}")
+                    })
+            });
         self.finish(activation)
     }
 
@@ -57,7 +98,10 @@ impl StagedMcp {
             .ok_or("Missing staging ownership")?
             .cleanup();
         match (result, cleanup) {
-            (result, Ok(())) => result,
+            (Ok(value), Ok(_)) => Ok(value),
+            (Err(error), Ok(_)) => Err(format!(
+                "{error}; staging retained for manual review; automatic cleanup disabled"
+            )),
             (Ok(_), Err(_)) => Err("MCP activated, but staging cleanup refused or failed".into()),
             (Err(error), Err(_)) => Err(format!("{error}; staging cleanup refused or failed")),
         }
@@ -77,10 +121,16 @@ impl Drop for StagedMcp {
 }
 
 pub async fn install_mcp(paths: &InstallerPaths) -> Result<(), String> {
-    stage_mcp(paths).await?.activate()
+    let paths = paths.clone();
+    super::deadline::run(move || async move { stage_mcp_inner(&paths).await?.activate() }).await
 }
 
 pub async fn stage_mcp(paths: &InstallerPaths) -> Result<StagedMcp, String> {
+    let paths = paths.clone();
+    super::deadline::run(move || async move { stage_mcp_inner(&paths).await }).await
+}
+
+async fn stage_mcp_inner(paths: &InstallerPaths) -> Result<StagedMcp, String> {
     let lock = validate_contract(PACKAGE_JSON, PACKAGE_LOCK)?;
     if !cfg!(target_os = "macos") {
         return Err("MCP installation currently requires macOS".into());
@@ -104,10 +154,7 @@ pub async fn stage_mcp(paths: &InstallerPaths) -> Result<StagedMcp, String> {
         .map_err(|_| "Cannot prepare installation root")?;
     let runtime_guard = DirectoryGuard::capture(&[&paths.root, &paths.runtime])
         .map_err(|_| "Managed Node.js runtime is unavailable")?;
-    let path = super::workspace::prepare_installation_workspace(paths)
-        .map_err(|_| "Cannot prepare MCP staging workspace")?;
-    let attempt =
-        StagingAttempt::capture(paths, path).map_err(|_| "Cannot capture MCP staging ownership")?;
+    let attempt = StagingAttempt::create(paths, super::attempt::InstallationKind::Mcp)?;
     let mut staged = StagedMcp {
         staged: attempt.path().join("mcp"),
         paths: paths.clone(),
@@ -115,7 +162,11 @@ pub async fn stage_mcp(paths: &InstallerPaths) -> Result<StagedMcp, String> {
         runtime_guard,
         lock,
     };
-    let result = populate(&staged).await;
+    let attempt = staged.attempt.as_ref().ok_or("Missing attempt ownership")?;
+    attempt.state(super::attempt::Lifecycle::Running)?;
+    let result = super::limits::monitor(attempt, super::limits::MCP, populate(&staged))
+        .await
+        .and_then(|()| attempt.checkpoint(super::attempt::Lifecycle::Prepared));
     match result {
         Ok(()) => Ok(staged),
         Err(error) => staged.finish(Err(error)),
@@ -178,6 +229,7 @@ pub(super) fn activate_mcp(
     ensure_destination_absent(&paths.mcp)?;
     validate_installation(source, lock)?;
     guard.verify().map_err(|_| "MCP staging identity changed")?;
+    super::deadline::check()?;
     super::activate::rename_without_replacement(source, &paths.mcp)
         .map_err(|_| "Atomic MCP activation failed; existing destination preserved".into())
 }

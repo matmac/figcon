@@ -5,6 +5,7 @@ use super::extract::extract_node_archive;
 use super::manifest::NODE_VERSION;
 use super::paths::InstallerPaths;
 use super::validate::validate_node_runtime;
+#[cfg(test)]
 use super::workspace::prepare_installation_workspace;
 
 /// Downloads and extracts a pinned Node.js runtime into private staging.
@@ -14,8 +15,13 @@ pub async fn prepare_node_runtime(
     paths: &InstallerPaths,
     architecture: &str,
 ) -> Result<PathBuf, String> {
-    prepare_node_runtime_with_downloader(paths, architecture, |arch, dest| {
-        Box::pin(download_node_archive(arch, dest))
+    let paths = paths.clone();
+    let architecture = architecture.to_owned();
+    super::deadline::run(move || async move {
+        prepare_node_runtime_with_downloader(&paths, &architecture, |arch, dest| {
+            Box::pin(download_node_archive(arch, dest))
+        })
+        .await
     })
     .await
 }
@@ -55,23 +61,24 @@ where
         return Err("Unsupported macOS architecture".into());
     }
 
-    let staging = prepare_installation_workspace(paths)
-        .map_err(|_| "Failed to prepare installation workspace")?;
-
-    let attempt = super::cleanup::StagingAttempt::capture(paths, staging)
-        .map_err(|error| format!("Failed to capture staging ownership: {error}"))?;
+    let attempt =
+        super::cleanup::StagingAttempt::create(paths, super::attempt::InstallationKind::Node)?;
+    attempt.state(super::attempt::Lifecycle::Running)?;
     let result = prepare_in_staging(&attempt, architecture, downloader).await;
     match result {
         Ok(runtime) => {
             attempt
                 .verify()
                 .map_err(|error| format!("Staging ownership changed: {error}"))?;
+            attempt.checkpoint(super::attempt::Lifecycle::Prepared)?;
             Ok((runtime, attempt))
         }
         Err(error) => match attempt.cleanup() {
-            Ok(()) => Err(error),
+            Ok(_) => Err(format!(
+                "{error}; staging retained for manual review; automatic cleanup disabled"
+            )),
             Err(cleanup) => Err(format!(
-                "{error}; staging cleanup refused or failed: {cleanup}"
+                "{error}; staging cleanup refused or failed: {cleanup}; staging retained for manual review"
             )),
         },
     }
@@ -105,7 +112,8 @@ where
     attempt
         .verify()
         .map_err(|error| format!("Staging ownership changed: {error}"))?;
-    std::fs::remove_file(&archive).map_err(|_| "Failed to remove downloaded archive")?;
+    // Retain the verified archive: deleting through its parent pathname or a
+    // held parent descriptor cannot guarantee continued staging ancestry.
 
     Ok(runtime)
 }
@@ -131,7 +139,7 @@ mod tests {
         .await;
         let error = result.unwrap_err();
         assert!(error.contains("Simulated download failure"));
-        assert!(error.contains("staging cleanup refused or failed"));
+        assert!(error.contains("staging retained for manual review"));
         let replacement = std::fs::read_dir(&paths.staging)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -182,7 +190,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn automatically_cleans_up_failed_download() {
+    async fn retains_unsealed_partial_download_and_reports_retention() {
         let temp = tempfile::tempdir().unwrap();
         let paths = InstallerPaths::new(temp.path().join("figcon"));
 
@@ -197,21 +205,25 @@ mod tests {
             })
             .await;
 
-        assert_eq!(result.unwrap_err(), "Simulated download failure");
+        assert!(
+            result
+                .unwrap_err()
+                .contains("staging retained for manual review")
+        );
 
         assert!(!paths.runtime.exists());
         assert!(!paths.mcp.exists());
 
         assert_eq!(
             std::fs::read_dir(&paths.staging).unwrap().count(),
-            0,
-            "Failed installation must remove its staging directory"
+            1,
+            "Unsealed partial data must remain for manual review"
         );
     }
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn automatically_cleans_up_invalid_archive() {
+    async fn retains_unsealed_invalid_archive_for_manual_review() {
         let temp = tempfile::tempdir().unwrap();
         let paths = InstallerPaths::new(temp.path().join("figcon"));
 
@@ -231,8 +243,8 @@ mod tests {
 
         assert_eq!(
             std::fs::read_dir(&paths.staging).unwrap().count(),
-            0,
-            "Failed extraction must remove its staging directory"
+            1,
+            "An invalid archive must not be silently adopted by cleanup"
         );
     }
 
@@ -286,7 +298,10 @@ mod tests {
             super::super::test_support::node_script().as_bytes()
         );
 
-        assert!(!result.parent().unwrap().join("node.tar.gz").exists());
+        assert!(
+            result.parent().unwrap().join("node.tar.gz").is_file(),
+            "Verified archive is retained too"
+        );
         assert!(!paths.runtime.exists());
         assert!(!paths.mcp.exists());
 

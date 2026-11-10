@@ -56,6 +56,7 @@ pub async fn activate_node_runtime(
         .map_err(io::Error::other)?;
 
     directories.verify()?;
+    super::deadline::check().map_err(io::Error::other)?;
     rename_without_replacement(staged_runtime, &paths.runtime)
 }
 

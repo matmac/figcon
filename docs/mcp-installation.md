@@ -35,26 +35,31 @@ the concrete versions and tarball integrity values are frozen by lockfile v3.
    nonempty `node_modules/figma-console-mcp/dist/local.js` entry point.
    Run private `npm ls --all --offline --json` to check the logical dependency
    tree. This does not execute MCP code or package lifecycle scripts.
-5. Retain a staging handle until activation (or explicitly discard it). Recheck
+5. Retain a staging handle until activation (or explicitly abandon it). Recheck
    ownership and the staged tree; activate using the same macOS `renameatx_np(RENAME_EXCL)` primitive as
    the runtime installer. An existing destination, including an empty directory
    or dangling symlink, is never replaced.
-6. Remove only this attempt's staging resources. A changed directory identity
-   causes cleanup to refuse deletion; cleanup failures are returned separately
-   from the primary operation. If activation succeeded but cleanup failed, the
-   error explicitly states that activation already completed.
+6. Retire the handle without deleting staging or its receipt/lease paths.
+   Automatic staging cleanup is disabled because held directory descriptors do
+   not guarantee continued ancestry after rename. Intentional retention is
+   diagnosed and does not turn successful activation into an installation
+   failure. Failed installation errors also report retained staging. Manual
+   review is required before reclamation.
 
 ## Interruption and limits
 
 Version probes have 10-second limits, `npm ci` has a 10-minute limit, and npm
 dependency inspection has a 30-second limit. Stdout is discarded except for
-version probes, which are limited to 256 bytes. On timeout the command's Unix
-process group is killed and the direct child is reaped before normal cleanup.
+version probes, which are limited to 256 bytes. On timeout the owned Unix
+process group is terminated and direct-child reaping is bounded. macOS exit
+observation keeps the leader unreaped until descendant supervision completes.
 Dropping an installation future also signals the process group, including
 ordinary descendants. A cancelled or abandoned staging handle retains its
 private attempt and emits a generic warning: synchronous drop cannot safely
-wait for all child processes to exit. Automated recovery of these retained
-attempts requires a separate ownership/liveness design.
+wait for all child processes to exit. Durable leases, non-destructive crash
+recovery reporting, and best-effort byte/count/duration safeguards are described in
+[installation recovery](installer-recovery.md). Unsealed or externally modified
+attempts require manual review; retirement does not adopt or delete partial npm contents.
 
 ## Security boundaries and open decisions
 
@@ -63,8 +68,8 @@ attempts requires a separate ownership/liveness design.
   `npm ci` is not complete supply-chain security. Package code is not executed
   during installation, but will execute when a later client launches MCP.
 - npm and its archive handling are trusted components of the checksum-pinned
-  runtime. Installation is not an OS sandbox. Post-extraction size/entry checks
-  do not impose disk quotas while npm is extracting. Runtime file contents can
+  runtime. Installation is not an OS sandbox. Monitored size/entry limits can
+  overshoot between scans and do not provide a hard aggregate filesystem quota. Runtime file contents can
   also be modified by another process with the same user's privileges.
 - Directory handles and inode/device checks detect many replacements, but the
   remaining pathname operations have TOCTOU windows. Stronger defenses require
@@ -106,3 +111,7 @@ real-archive tests described in the runtime alias policy.
 
 Command behavior references: [npm ci](https://docs.npmjs.com/cli/v11/commands/npm-ci/)
 and [npm ls](https://docs.npmjs.com/cli/v11/commands/npm-ls/).
+
+The supported cooperative same-user threat boundary, non-destructive live
+attempt retirement, serialized admission, shared deadline, and disabled automatic
+recovery deletion are defined in [the recovery policy](installer-recovery.md).

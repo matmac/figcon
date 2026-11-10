@@ -9,6 +9,7 @@ pub fn verify_sha256(path: &Path, expected: &str) -> io::Result<bool> {
     let mut buffer = [0u8; 64 * 1024];
 
     loop {
+        super::deadline::check().map_err(io::Error::other)?;
         let bytes_read = file.read(&mut buffer)?;
 
         if bytes_read == 0 {

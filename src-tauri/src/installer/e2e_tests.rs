@@ -138,6 +138,9 @@ async fn versions(paths: &InstallerPaths) -> (String, String) {
             .unwrap(),
     )
     .unwrap();
+    attempt
+        .checkpoint(super::attempt::Lifecycle::Prepared)
+        .unwrap();
     attempt.cleanup().unwrap();
     (node.trim().to_owned(), npm.trim().to_owned())
 }
@@ -193,7 +196,7 @@ async fn clean_managed_installation_e2e() {
     println!("E2E incomplete status: error; incomplete destination preserved");
 
     // Fault injection is confined to a completed, attempt-owned staging tree.
-    // Activation revalidates it and must remove only that failed attempt.
+    // Activation revalidates it; retention must preserve all staging data.
     let staged = super::mcp::stage_mcp(&paths).await.unwrap();
     let failed_path = staged.path().to_path_buf();
     fs::write(
@@ -204,13 +207,19 @@ async fn clean_managed_installation_e2e() {
     )
     .unwrap();
     let failure = staged.activate().unwrap_err();
-    assert!(failure.contains("MCP entry point is empty"));
-    assert!(!failed_path.exists());
+    assert!(failure.contains("durable checkpoint"));
+    assert!(failure.contains("staging retained"));
+    assert!(
+        failed_path.exists(),
+        "Modified staging must remain for manual review"
+    );
     assert!(!paths.mcp.exists());
-    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 3);
     assert_eq!(snapshot(&paths.runtime), runtime_before);
     assert_status(&paths, InstallationState::NotInstalled);
-    println!("E2E corrupt staging: activation rejected, owned staging removed, runtime preserved");
+    println!(
+        "E2E corrupt staging: activation rejected, modified staging retained for review, runtime preserved"
+    );
 
     // Recovery uses the production top-level MCP installer and fresh network
     // resolution frozen to the embedded, reviewed lockfile (scripts disabled).
@@ -251,7 +260,7 @@ async fn clean_managed_installation_e2e() {
     );
     assert_eq!(snapshot(&paths.runtime), runtime_before);
     assert_eq!(snapshot(&paths.mcp), mcp_before);
-    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(&paths.staging).unwrap().count(), 5);
     assert_status(&paths, InstallationState::Installed);
     println!(
         "E2E repeat installation: both refused; content, identities, and permissions unchanged; status: installed"

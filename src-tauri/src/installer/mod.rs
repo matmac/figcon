@@ -36,12 +36,25 @@ pub mod activate;
 
 pub mod install;
 
+#[cfg(target_os = "macos")]
+mod admission;
+#[cfg(target_os = "macos")]
+mod anchored;
+mod attempt;
+mod attempt_inventory;
+mod attempt_process;
+mod deadline;
+mod limits;
 pub mod mcp;
 mod mcp_contract;
 mod mcp_fs;
 mod npm;
 mod process;
+pub mod recovery;
 mod runtime_aliases;
+
+#[cfg(all(test, target_os = "macos"))]
+mod recovery_tests;
 
 #[cfg(all(test, unix))]
 mod test_support;

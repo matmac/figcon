@@ -3,12 +3,12 @@ use std::path::Path;
 use tokio::io::AsyncWriteExt;
 
 use super::checksum::verify_sha256;
-use super::cleanup::remove_if_same_file;
 use super::manifest::node_archive;
 
 const MAX_ARCHIVE_BYTES: u64 = 100 * 1024 * 1024;
 
 pub async fn download_node_archive(architecture: &str, destination: &Path) -> Result<(), String> {
+    super::deadline::check()?;
     let (url, expected_checksum) =
         node_archive(architecture).ok_or("Unsupported macOS architecture")?;
 
@@ -42,9 +42,7 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
         }
     }
 
-    let mut created_file_metadata = None;
-
-    let result = async {
+    let result: Result<(), String> = async {
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -52,11 +50,14 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
             .await
             .map_err(|_| "Failed to create download file")?;
 
-        created_file_metadata = Some(
-            file.metadata()
-                .await
-                .map_err(|_| "Failed to inspect download file")?,
-        );
+        if !file
+            .metadata()
+            .await
+            .map_err(|_| "Failed to inspect download file")?
+            .is_file()
+        {
+            return Err("Download destination is not a regular file".into());
+        }
 
         let mut response = response;
         let mut total_bytes = 0u64;
@@ -66,6 +67,7 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
             .await
             .map_err(|_| "Node.js download interrupted")?
         {
+            super::deadline::check()?;
             total_bytes = total_bytes
                 .checked_add(chunk.len() as u64)
                 .ok_or("Download size overflow")?;
@@ -100,13 +102,12 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
     }
     .await;
 
-    if result.is_err() {
-        if let Some(metadata) = created_file_metadata.as_ref() {
-            let _ = remove_if_same_file(destination, metadata);
-        }
+    if let Err(error) = result {
+        return Err(format!(
+            "{error}; download staging retained; automatic cleanup disabled"
+        ));
     }
-
-    result
+    Ok(())
 }
 
 #[cfg(test)]
