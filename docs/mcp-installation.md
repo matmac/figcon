@@ -1,9 +1,10 @@
 # Staged MCP installation
 
 The Rust installer exposes `mcp::stage_mcp` and `mcp::install_mcp` internally.
-They are not registered Tauri commands and have no UI controls. They do not read
-or write external MCP client configurations. Installation currently requires
-macOS; unsupported platforms return an error before creating staging resources.
+The [typed installation API](installation-api.md) wraps these production functions
+with fixed-purpose Tauri commands, progress, status, and cancellation. The API supports
+[guided desktop setup controls](installer-ui.md). They do not read or write external MCP client
+configurations. Installation currently requires macOS; unsupported platforms return an error before creating staging resources.
 
 ## Contract and stages
 

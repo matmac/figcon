@@ -71,21 +71,23 @@ pub(super) fn rename_without_replacement(source: &Path, destination: &Path) -> i
     let destination = CString::new(destination.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid destination path"))?;
 
-    let result = unsafe {
-        libc::renameatx_np(
-            libc::AT_FDCWD,
-            source.as_ptr(),
-            libc::AT_FDCWD,
-            destination.as_ptr(),
-            libc::RENAME_EXCL,
-        )
-    };
+    super::deadline::activate(|| {
+        let result = unsafe {
+            libc::renameatx_np(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                destination.as_ptr(),
+                libc::RENAME_EXCL,
+            )
+        };
 
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    })
 }
 
 #[cfg(not(target_os = "macos"))]

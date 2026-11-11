@@ -43,6 +43,7 @@ where
         .map_err(|error| format!("Staging ownership changed: {error}"))?;
     attempt.verify_checkpoint()?;
     attempt.state(super::attempt::Lifecycle::Activating)?;
+    super::progress::milestone(super::api_models::Stage::Activating);
     let activation = activate_node_runtime(paths, &staged_runtime)
         .await
         .map_err(|error| format!("Failed to activate Node.js runtime: {error}"));

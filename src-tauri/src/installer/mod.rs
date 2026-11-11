@@ -40,6 +40,10 @@ pub mod install;
 mod admission;
 #[cfg(target_os = "macos")]
 mod anchored;
+pub mod api;
+mod api_backend;
+mod api_models;
+mod api_service;
 mod attempt;
 mod attempt_inventory;
 mod attempt_process;
@@ -50,6 +54,7 @@ mod mcp_contract;
 mod mcp_fs;
 mod npm;
 mod process;
+mod progress;
 pub mod recovery;
 mod runtime_aliases;
 
@@ -64,3 +69,9 @@ mod node_archive_tests;
 
 #[cfg(all(test, target_os = "macos", target_arch = "aarch64"))]
 mod e2e_tests;
+
+#[cfg(test)]
+mod api_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+mod external_config_tests;

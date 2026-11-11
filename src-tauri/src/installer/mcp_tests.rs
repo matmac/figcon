@@ -10,7 +10,7 @@ async fn unsupported_platform_has_no_side_effects() {
 }
 
 #[cfg(target_os = "macos")]
-mod macos {
+pub(in crate::installer) mod macos {
     use super::*;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -44,7 +44,7 @@ mod macos {
         format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"))
     }
 
-    fn setup(base: &Path, action: &str) -> InstallerPaths {
+    pub(in crate::installer) fn setup(base: &Path, action: &str) -> InstallerPaths {
         let paths = InstallerPaths::new(base.join("figcon"));
         super::super::super::root::prepare_installation_root(&paths.root).unwrap();
         super::super::super::test_support::write_runtime(&paths.runtime);

@@ -50,7 +50,7 @@ cargo check --locked --manifest-path src-tauri/Cargo.toml
 npm run tauri build -- --no-bundle
 ```
 
-Use `npm ci` when dependency installation is needed. The frontend build runs TypeScript checking and Vite; no separate frontend test script is currently defined. CI runs Rust formatting checks, Rust tests, backend checks, and frontend/desktop builds on macOS and Windows. Never run an automatic formatter over unrelated or pre-existing work.
+Use `npm ci` when dependency installation is needed. The frontend build runs TypeScript checking and Vite; `npm run test:installer` checks the installer transport and state reconciliation. CI runs Rust formatting checks, Rust tests, backend checks, and frontend/desktop builds on macOS and Windows. Never run an automatic formatter over unrelated or pre-existing work.
 
 For documentation-only work, inspect the document and resulting diff; builds are unnecessary unless the documentation change affects executable behavior. Report which checks ran, their results, and anything skipped or blocked. Distinguish existing failures from regressions without changing unrelated work.
 

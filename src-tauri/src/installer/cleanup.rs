@@ -129,6 +129,7 @@ impl StagingAttempt {
         paths: &super::paths::InstallerPaths,
         kind: super::attempt::InstallationKind,
     ) -> Result<Self, String> {
+        super::progress::milestone(super::api_models::Stage::Preparing);
         super::deadline::check()?;
         super::root::prepare_installation_root(&paths.root)
             .map_err(|_| "Cannot prepare installation root")?;
@@ -149,10 +150,12 @@ impl StagingAttempt {
             );
         }
         if report.retained.len() >= 8 {
+            super::progress::hint(super::api_models::ErrorCode::AttemptLimit);
             return Err("Too many retained attempts; manual staging review is required".into());
         }
         let path = super::workspace::prepare_installation_workspace(paths)
             .map_err(|_| "Cannot create installation workspace")?;
+        super::progress::staging_created();
         Self::capture_typed(paths, path, kind)
             .map_err(|_| "Cannot initialize durable attempt metadata; staging retained".into())
     }

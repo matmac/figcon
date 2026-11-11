@@ -81,6 +81,7 @@ impl StagedMcp {
                 super::limits::MCP.check(attempt)?;
                 attempt.verify_checkpoint()?;
                 attempt.state(super::attempt::Lifecycle::Activating)?;
+                super::progress::milestone(super::api_models::Stage::Activating);
                 activate_mcp(&self.paths, &self.staged, &self.lock)?;
                 attempt
                     .checkpoint(super::attempt::Lifecycle::Activated)
@@ -131,6 +132,7 @@ pub async fn stage_mcp(paths: &InstallerPaths) -> Result<StagedMcp, String> {
 }
 
 async fn stage_mcp_inner(paths: &InstallerPaths) -> Result<StagedMcp, String> {
+    super::progress::milestone(super::api_models::Stage::Verifying);
     let lock = validate_contract(PACKAGE_JSON, PACKAGE_LOCK)?;
     if !cfg!(target_os = "macos") {
         return Err("MCP installation currently requires macOS".into());
@@ -182,9 +184,12 @@ async fn populate(staged: &StagedMcp) -> Result<(), String> {
         PACKAGE_LOCK.as_bytes(),
     )?;
     let npm = NpmEnvironment::create(attempt.path(), &staged.paths.runtime, &staged.staged)?;
+    super::progress::milestone(super::api_models::Stage::Validating);
     super::validate::validate_node_runtime(&staged.paths.runtime).await?;
     verify_ownership(staged)?;
+    super::progress::milestone(super::api_models::Stage::Installing);
     npm.ci().await?;
+    super::progress::milestone(super::api_models::Stage::Validating);
     verify_ownership(staged)?;
     validate_installation(&staged.staged, &staged.lock)?;
     npm.validate_dependencies().await?;
@@ -236,4 +241,4 @@ pub(super) fn activate_mcp(
 
 #[cfg(test)]
 #[path = "mcp_tests.rs"]
-mod tests;
+pub(super) mod tests;

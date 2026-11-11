@@ -168,3 +168,8 @@ gate: exactly eight allocations succeed and four are rejected. Existing tests
 cover replacement/insertion, deadlines during hashing/validation, surviving
 descendants, orphan reporting, and repeated non-destructive recovery. The opt-in [E2E test](installation-e2e.md) exercises the real pinned
 runtime/package without system Node/npm or external client configuration changes.
+
+The [managed installation API](installation-api.md) adds an operation-wide flock
+for cooperating API callers, typed retention diagnostics, attempt-scoped progress,
+and explicit cancellation sharing the activation boundary. It never enables
+staging reclamation. Internal installer entry points retain their admission lock.

@@ -33,7 +33,7 @@ pub(in crate::installer) fn sync_directory(path: &Path) -> Result<(), String> {
         .map_err(|_| "Cannot sync installation directory".into())
 }
 
-fn nonce() -> Result<String, String> {
+pub(in crate::installer) fn nonce() -> Result<String, String> {
     let mut random = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut random))
@@ -151,7 +151,9 @@ impl Journal {
         file.sync_all().map_err(|_| "Cannot sync attempt lease")?;
         let record = Record {
             schema: 1,
-            attempt_id: nonce()?,
+            attempt_id: crate::installer::progress::attempt_id()
+                .map(Ok)
+                .unwrap_or_else(nonce)?,
             directory: name.to_owned(),
             kind,
             created_unix_ms: std::time::SystemTime::now()
