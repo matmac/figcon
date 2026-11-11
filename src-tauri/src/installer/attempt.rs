@@ -41,4 +41,8 @@ pub(super) struct Record {
 #[path = "attempt_macos.rs"]
 mod macos;
 #[cfg(target_os = "macos")]
-pub(super) use macos::{Journal, load, open_lease, validate_private};
+pub(super) use macos::{Journal, load, nonce as new_id, open_lease, validate_private};
+#[cfg(not(target_os = "macos"))]
+pub(super) fn new_id() -> Result<String, String> {
+    Err("Managed installation requires macOS".into())
+}

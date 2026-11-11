@@ -42,6 +42,8 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
         }
     }
 
+    let length = response.content_length();
+    super::progress::downloaded(0, length, true);
     let result: Result<(), String> = async {
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
@@ -79,8 +81,10 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
             file.write_all(&chunk)
                 .await
                 .map_err(|_| "Failed to write download file")?;
+            super::progress::downloaded(total_bytes, length, false);
         }
 
+        super::progress::downloaded(total_bytes, length, true);
         if total_bytes == 0 {
             return Err("Node.js download was empty".into());
         }
@@ -91,6 +95,7 @@ pub async fn download_node_archive(architecture: &str, destination: &Path) -> Re
 
         drop(file);
 
+        super::progress::milestone(super::api_models::Stage::Verifying);
         let valid = verify_sha256(destination, expected_checksum)
             .map_err(|_| "Failed to verify archive checksum")?;
 

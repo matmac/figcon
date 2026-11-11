@@ -100,13 +100,16 @@ where
     let archive = attempt.path().join("node.tar.gz");
     let runtime = attempt.path().join("runtime");
 
+    super::progress::milestone(super::api_models::Stage::Downloading);
     downloader(architecture, &archive).await?;
     attempt
         .verify()
         .map_err(|error| format!("Staging ownership changed: {error}"))?;
 
+    super::progress::milestone(super::api_models::Stage::Extracting);
     extract_node_archive(&archive, &runtime, NODE_VERSION, architecture)?;
 
+    super::progress::milestone(super::api_models::Stage::Validating);
     validate_node_runtime(&runtime).await?;
 
     attempt

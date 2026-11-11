@@ -145,6 +145,78 @@ async fn versions(paths: &InstallerPaths) -> (String, String) {
     (node.trim().to_owned(), npm.trim().to_owned())
 }
 
+// Exercise the same dispatcher and observer used by Tauri commands, without a
+// webview or changing the production path resolver to accept user input.
+async fn api_install(paths: &InstallerPaths, component: super::api_models::Component) {
+    use super::api_models::{OperationState, Stage};
+    use std::sync::{Arc, Mutex};
+    let service = super::api_service::Service::default();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let output = events.clone();
+    let id = super::attempt::new_id().unwrap();
+    let op = service
+        .reserve(
+            component,
+            "e2e".into(),
+            id.clone(),
+            Arc::new(move |e| output.lock().unwrap().push(e)),
+        )
+        .unwrap();
+    service.execute(op, paths.clone()).await;
+    let report = service
+        .inspect(|| {
+            let target = paths.clone();
+            async move {
+                super::deadline::run(
+                    move || async move { Ok(super::api_backend::inspect(&target)) },
+                )
+                .await
+                .map_err(|_| {
+                    super::api_models::InstallationError::new(
+                        super::api_models::ErrorCode::StateUnavailable,
+                    )
+                })
+            }
+        })
+        .await
+        .unwrap();
+    let status = match component {
+        super::api_models::Component::Node => report.node,
+        super::api_models::Component::Mcp => report.mcp,
+    };
+    assert_eq!(
+        status.last_operation.as_ref().unwrap().state,
+        OperationState::Installed,
+        "{:?}",
+        status.last_operation
+    );
+    let events = events.lock().unwrap();
+    assert_eq!(events.first().unwrap().stage, Stage::Preparing);
+    assert_eq!(events.last().unwrap().stage, Stage::Completed);
+    assert!(
+        events
+            .iter()
+            .enumerate()
+            .all(|(index, e)| e.attempt_id == id
+                && e.component == component
+                && e.sequence == (index + 1) as u64)
+    );
+    assert!(events.last().unwrap().retained_staging && events.last().unwrap().activated);
+    assert!(events.windows(2).all(|p| p[0].revision < p[1].revision));
+    assert!(report.revision >= events.last().unwrap().revision);
+    if component == super::api_models::Component::Node {
+        let bytes = events
+            .iter()
+            .filter_map(|e| e.downloaded_bytes)
+            .last()
+            .unwrap();
+        assert!(bytes > 0);
+        println!(
+            "E2E API Node download: {bytes} actual bytes; ordered terminal event and retained staging verified"
+        );
+    }
+}
+
 #[tokio::test]
 #[ignore = "opt-in macOS arm64 end-to-end test; downloads real Node.js and pinned npm packages"]
 async fn clean_managed_installation_e2e() {
@@ -165,9 +237,7 @@ async fn clean_managed_installation_e2e() {
 
     // Actual HTTPS download + pinned SHA-256, extraction, private version
     // probes, atomic activation, and attempt-owned cleanup. No seeded fixture.
-    super::install::install_node_runtime(&paths, "arm64")
-        .await
-        .unwrap();
+    api_install(&paths, super::api_models::Component::Node).await;
     super::validate::validate_node_runtime(&paths.runtime)
         .await
         .unwrap();
@@ -223,7 +293,7 @@ async fn clean_managed_installation_e2e() {
 
     // Recovery uses the production top-level MCP installer and fresh network
     // resolution frozen to the embedded, reviewed lockfile (scripts disabled).
-    super::mcp::install_mcp(&paths).await.unwrap();
+    api_install(&paths, super::api_models::Component::Mcp).await;
     let lock = super::mcp_contract::validate_contract(
         super::mcp_contract::PACKAGE_JSON,
         super::mcp_contract::PACKAGE_LOCK,

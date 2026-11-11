@@ -14,15 +14,24 @@ pub(super) struct Deadline {
 }
 struct State {
     cancelled: AtomicBool,
+    requested: AtomicBool,
+    committed: std::sync::Mutex<bool>,
+    observer: Option<Arc<super::progress::Progress>>,
     groups: std::sync::Mutex<Vec<std::sync::Weak<super::process::Group>>>,
 }
 thread_local! { static CURRENT: RefCell<Option<Deadline>> = const { RefCell::new(None) }; }
 impl Deadline {
     pub fn new(duration: Duration) -> Self {
+        Self::observed(duration, None)
+    }
+    pub fn observed(duration: Duration, observer: Option<Arc<super::progress::Progress>>) -> Self {
         Self {
             end: Instant::now() + duration,
             state: Arc::new(State {
                 cancelled: AtomicBool::new(false),
+                requested: AtomicBool::new(false),
+                committed: std::sync::Mutex::new(false),
+                observer,
                 groups: std::sync::Mutex::new(Vec::new()),
             }),
         }
@@ -41,6 +50,34 @@ impl Deadline {
         }
         Ok(())
     }
+    pub fn is_cancelled(&self) -> bool {
+        self.state.requested.load(Ordering::Acquire)
+    }
+    pub fn cancel(&self) -> super::api_models::CancellationDisposition {
+        self.stop(true)
+    }
+    fn stop(&self, requested: bool) -> super::api_models::CancellationDisposition {
+        use super::api_models::CancellationDisposition::*;
+        let Ok(committed) = self.state.committed.lock() else {
+            return TooLate;
+        };
+        if *committed {
+            return TooLate;
+        }
+        let already = self.state.requested.load(Ordering::Acquire);
+        if requested {
+            self.state.requested.store(true, Ordering::Release);
+        }
+        self.state.cancelled.store(true, Ordering::Release);
+        if let Ok(groups) = self.state.groups.lock() {
+            for group in groups.iter().filter_map(std::sync::Weak::upgrade) {
+                if !group.stop() {
+                    eprintln!("Cannot terminate cancelled installation group; staging retained");
+                }
+            }
+        }
+        if already { AlreadyRequested } else { Requested }
+    }
     pub fn enter(&self) -> Scope {
         Scope(CURRENT.with(|c| c.replace(Some(self.clone()))))
     }
@@ -53,6 +90,27 @@ impl Drop for Scope {
 }
 pub(super) fn check() -> Result<(), String> {
     CURRENT.with(|c| c.borrow().as_ref().map_or(Ok(()), Deadline::check))
+}
+pub(super) fn observer() -> Option<Arc<super::progress::Progress>> {
+    CURRENT.with(|c| c.borrow().as_ref().and_then(|d| d.state.observer.clone()))
+}
+/// Cancellation and the no-replace rename share a linearization point.
+#[cfg(target_os = "macos")]
+pub(super) fn activate(work: impl FnOnce() -> std::io::Result<()>) -> std::io::Result<()> {
+    let deadline = Deadline::current();
+    let mut committed = deadline
+        .state
+        .committed
+        .lock()
+        .map_err(|_| std::io::Error::other("Activation state unavailable"))?;
+    deadline.check().map_err(std::io::Error::other)?;
+    work()?;
+    *committed = true;
+    drop(committed); // Never acquire the revision clock while holding activation.
+    if let Some(observer) = &deadline.state.observer {
+        observer.activated();
+    }
+    Ok(())
 }
 #[cfg(target_os = "macos")]
 pub(super) fn register_group(group: &Arc<super::process::Group>) {
@@ -71,14 +129,7 @@ pub(super) fn register_group(group: &Arc<super::process::Group>) {
 struct Cancel(Deadline);
 impl Drop for Cancel {
     fn drop(&mut self) {
-        self.0.state.cancelled.store(true, Ordering::Release);
-        if let Ok(groups) = self.0.state.groups.lock() {
-            for group in groups.iter().filter_map(std::sync::Weak::upgrade) {
-                if !group.stop() {
-                    eprintln!("Cannot terminate cancelled installation group; staging retained");
-                }
-            }
-        }
+        self.0.stop(false);
     }
 }
 static WORKERS: AtomicUsize = AtomicUsize::new(0);
@@ -96,7 +147,14 @@ where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<T, String>>,
 {
-    run_with(Deadline::current(), work).await
+    // A current-thread worker already owns this deadline. Avoid detached nested
+    // workers so admission remains held until cooperative work has settled.
+    if CURRENT.with(|c| c.borrow().is_some()) {
+        check()?;
+        work().await
+    } else {
+        run_with(Deadline::current(), work).await
+    }
 }
 
 pub(super) async fn run_with<T, F, Fut>(deadline: Deadline, work: F) -> Result<T, String>
@@ -137,10 +195,10 @@ where
     });
     let result = task
         .await
-        .map_err(|_| "Installation worker failed; staging retained")?;
+        .map_err(|_| "Installation worker failed; staging retained");
     // A staged handle inherits the deadline; successful return is not cancellation.
     cancellation.0 = Deadline::new(Duration::from_secs(0));
-    result
+    result?
 }
 
 #[cfg(test)]
