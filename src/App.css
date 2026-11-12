@@ -9,7 +9,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, a { -webkit-tap-highlight-color: transparent; }
-button { font: inherit; cursor: pointer; }
+/* Keep WebKit native control painting from retaining the previous theme. */
+button { appearance: none; -webkit-appearance: none; font: inherit; cursor: pointer; }
 button:disabled { cursor: default; opacity: .55; }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
 a { color: inherit; text-decoration: none; }
@@ -103,3 +104,74 @@ progress::-webkit-progress-value { background: var(--accent); border-radius: 5px
 .progress-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .cancel-inline { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:7px 10px; color:var(--text); font-size:11px; white-space:nowrap; }
 .cancel-inline:hover { background:var(--tint); }
+
+/* Client review shares the setup palette; no separate application shell. */
+.app-navigation { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 22px; padding-bottom: 8px; }
+.app-navigation button { border: 0; border-radius: 7px; background: transparent; color: var(--muted); padding: 9px 13px; font-size: 12px; font-weight: 600; }
+.app-navigation button[aria-current="page"] { background: var(--tint); color: var(--accent); }
+.app-navigation button:hover { background: var(--tint); }
+.navigation-live { font-size: 10px; color: var(--accent); }
+.connections { width: 100%; max-width: 700px; margin: 30px auto 24px; }
+.connections .intro-description { max-width: 560px; }
+.connections .notice { margin-top: 12px; }
+.prerequisite-notice .button-text { padding-left: 0; }
+.section-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 22px 0 9px; }
+.section-toolbar h2 { font-size: 16px; }
+.client-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+.client-card { border: 1px solid var(--line); background: var(--surface); border-radius: 15px; padding: 22px; display: flex; flex-direction: column; align-items: flex-start; }
+.client-card-heading { display: flex; align-items: center; gap: 11px; }
+.client-card h3 { margin: 0; font-size: 16px; letter-spacing: -.3px; }
+.client-card-heading p { margin: 5px 0 0; font-size: 10px; color: var(--muted); }
+.client-monogram { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-weight: 750; background: var(--tint); color: var(--accent); }
+.client-detection { font-size: 10px; background: var(--tint); color: var(--muted); padding: 5px 8px; border-radius: 5px; margin-top: 18px; }
+.client-detection.detected { background: var(--green-tint); color: var(--green); }
+.client-card h4 { font-size: 13px; margin: 17px 0 7px; }
+.client-description, .client-inline-warning { font-size: 12px; line-height: 1.65; color: var(--muted); margin: 0 0 18px; }
+.client-inline-warning { color: var(--warning); }
+.client-card .button-secondary { margin-top: auto; width: 100%; padding: 11px 12px; }
+.client-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 12px; color: var(--muted); }
+.recovery-summary { display: flex; gap: 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 15px 0; margin-top: 20px; color: var(--muted); }
+.recovery-indicator { width: 16px; height: 16px; border: 1px solid var(--muted); border-radius: 50%; font-size: 11px; text-align: center; flex: 0 0 16px; }
+.recovery-summary h3 { margin: 0 0 4px; font-size: 11px; color: var(--text); }
+.recovery-summary p { margin: 0; font-size: 11px; line-height: 1.7; }
+.connection-review { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 24px; margin-top: 24px; scroll-margin-top: 18px; }
+.review-heading { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+.review-heading h2 { margin-top: 8px; font-size: 21px; letter-spacing: -.5px; }
+.plan-expiry { font-size: 10px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.plan-expiry.expired { color: var(--warning); }
+.review-description { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 17px 0; }
+.review-facts { margin: 0; }
+.review-facts > div { display: flex; justify-content: space-between; gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.review-facts dt { color: var(--muted); }
+.review-facts dt, .review-facts dd { font-size: 11px; line-height: 1.6; }
+.review-facts dd { text-align: right; margin: 0; overflow-wrap: anywhere; }
+.connection-review code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.technical-details { margin-top: 15px; font-size: 11px; }
+.technical-details summary { cursor: pointer; color: var(--accent); padding: 8px 0; width: fit-content; border-radius: 3px; }
+.technical-details dl { margin: 8px 0 0; padding: 14px; background: var(--tint); border-radius: 8px; }
+.technical-details dt { font-weight: 600; margin-top: 12px; }
+.technical-details dt:first-child { margin-top: 0; }
+.technical-details dd { margin: 5px 0 0; line-height: 1.6; }
+.technical-details ol { padding-left: 18px; margin: 0; }
+.plan-warnings { padding-left: 17px; font-size: 11px; color: var(--muted); line-height: 1.7; margin: 20px 0; }
+.plan-warnings li + li { margin-top: 6px; }
+.approval-confirmation { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.6; padding: 14px; background: var(--tint); border-radius: 9px; cursor: pointer; }
+.approval-confirmation input { accent-color: var(--accent); margin: 3px 0 0; flex: 0 0 15px; width: 15px; height: 15px; }
+.review-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 17px; }
+.review-actions .button-primary { min-width: 0; justify-content: center; }
+.review-footnote, .connection-footer-note { color: var(--muted); font-size: 10px; line-height: 1.7; }
+.review-footnote { margin: 12px 0 0; }
+.connection-footer-note { margin-top: 23px; }
+.connection-result { border-radius: 10px; margin-top: 16px; scroll-margin-top: 16px; }
+.review-clients-link { margin-top: 14px; display: inline-flex; gap: 20px; }
+button:disabled:hover { background: revert; }
+.button-primary:disabled:hover { background: var(--accent); }
+.button-secondary:disabled:hover { background: var(--surface); }
+@media (max-width: 640px) {
+  .client-grid { grid-template-columns: 1fr; }
+  .client-card { padding: 18px; }
+  .connection-review { padding: 18px; }
+  .review-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .review-facts > div { flex-direction: column; gap: 4px; }
+  .review-facts dd { text-align: left; }
+}

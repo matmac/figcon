@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test:installer": "node --import ./tests/tsx-register.mjs --test tests/installer-client.test.ts tests/installer-observe.test.ts tests/installer-tauri.test.ts tests/installer-ui.test.ts",
+    "test:installer": "node --import ./tests/tsx-register.mjs --test tests/installer-client.test.ts tests/installer-observe.test.ts tests/installer-tauri.test.ts tests/installer-ui.test.ts tests/client-integration.test.ts tests/connections-ui.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

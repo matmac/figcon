@@ -8,7 +8,14 @@ use models::EnvironmentInfo;
 use platform::{detect_architecture, detect_operating_system};
 
 #[tauri::command]
-pub fn detect_environment() -> EnvironmentInfo {
+pub fn detect_environment(app: tauri::AppHandle) -> EnvironmentInfo {
+    if crate::acceptance::legacy_blocked(&app) {
+        return EnvironmentInfo {
+            operating_system: detect_operating_system(),
+            architecture: detect_architecture(),
+            clients: Vec::new(),
+        };
+    }
     let mut clients = Vec::new();
 
     #[cfg(target_os = "macos")]

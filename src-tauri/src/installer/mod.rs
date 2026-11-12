@@ -21,6 +21,9 @@ use paths::InstallerPaths;
 use tauri::Manager;
 
 pub fn resolve_installer_paths(app: &tauri::AppHandle) -> Result<InstallerPaths, String> {
+    if let Some(roots) = crate::acceptance::roots(app).map_err(str::to_owned)? {
+        return Ok(InstallerPaths::new(roots.data.join("figcon-installer")));
+    }
     let root = app
         .path()
         .app_data_dir()
