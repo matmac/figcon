@@ -119,7 +119,12 @@ mod tests {
 }
 
 #[tauri::command]
-pub fn discover_claude_code_mcp() -> Result<Vec<ExternalMcpConfiguration>, String> {
+pub fn discover_claude_code_mcp(
+    app: tauri::AppHandle,
+) -> Result<Vec<ExternalMcpConfiguration>, String> {
+    if crate::acceptance::legacy_blocked(&app) {
+        return Err("Legacy discovery is unavailable in native acceptance mode".into());
+    }
     let home =
         std::env::var_os("HOME").ok_or_else(|| "Cannot resolve home directory".to_string())?;
 
