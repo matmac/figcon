@@ -27,7 +27,7 @@ fn fixture(client: Client, text: Option<&str>) -> Fixture {
         disk::create_dir_all(path.parent().unwrap()).unwrap();
         disk::write(path, bytes).unwrap();
     }
-    let engine = Engine::isolated(&home, &data).unwrap();
+    let engine = Engine::isolated_test(&home, &data).unwrap();
     let target = engine.target(client);
     if let Some(text) = text {
         disk::write(&target, text).unwrap();
@@ -123,7 +123,7 @@ fn expired_altered_replayed_and_foreign_plans_are_rejected() {
     let mut altered = p.clone();
     altered.binding.args.push("arbitrary".into());
     assert_eq!(f.engine.apply(&altered), Err(Code::Altered));
-    let other = Engine::isolated(&f.engine.home, &f.engine.data).unwrap();
+    let other = Engine::isolated_test(&f.engine.home, &f.engine.data).unwrap();
     assert_eq!(other.apply(&p), Err(Code::Altered));
     f.engine.apply(&p).unwrap();
     assert_eq!(f.engine.apply(&p), Err(Code::Consumed));
@@ -335,7 +335,7 @@ fn stale_receipts_and_incomplete_journals_do_not_authorize_ownership() {
 #[test]
 fn cooperating_concurrent_engines_cannot_apply_two_stale_plans() {
     let f = fixture(Client::ClaudeCode, Some("{}"));
-    let other = Engine::isolated(&f.engine.home, &f.engine.data).unwrap();
+    let other = Engine::isolated_test(&f.engine.home, &f.engine.data).unwrap();
     let a = f.engine.prepare(Client::ClaudeCode).unwrap();
     let b = other.prepare(Client::ClaudeCode).unwrap();
     let barrier = std::sync::Barrier::new(2);
@@ -429,7 +429,7 @@ fn isolated_lock_holder_child() {
         disk::read_to_string(home.join("test-capability")).unwrap(),
         token
     );
-    let engine = Engine::isolated(&home, &home.join("figcon-data")).unwrap();
+    let engine = Engine::isolated_test(&home, &home.join("figcon-data")).unwrap();
     let plan = engine.prepare(Client::ClaudeCode).unwrap();
     engine
         .apply_with(&plan, &mut |point| {
@@ -542,4 +542,24 @@ fn expiry_at_publication_barrier_does_not_mutate_target() {
         disk::metadata(candidate).unwrap().permissions().mode() & 0o777,
         0o600
     );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn acceptance_constructor_requires_validated_sibling_paths() {
+    let (_temp, session) = crate::acceptance::fixture();
+    let roots = session.roots().unwrap().unwrap();
+    assert!(Engine::isolated_acceptance(&roots, &roots.home, &roots.data).is_ok());
+    let (_other_temp, other_session) = crate::acceptance::fixture();
+    let other = other_session.roots().unwrap().unwrap();
+    assert!(Engine::isolated_acceptance(&roots, &other.home, &roots.data).is_err());
+    assert!(Engine::isolated_acceptance(&roots, &roots.home, &other.data).is_err());
+    assert!(
+        Engine::isolated_acceptance(&roots, &roots.home.join("..").join("home"), &roots.data)
+            .is_err()
+    );
+    let saved = roots.data.with_file_name("saved-data");
+    disk::rename(&roots.data, &saved).unwrap();
+    symlink(&other.data, &roots.data).unwrap();
+    assert!(Engine::isolated_acceptance(&roots, &roots.home, &roots.data).is_err());
 }

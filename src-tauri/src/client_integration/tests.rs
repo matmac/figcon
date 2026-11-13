@@ -12,6 +12,8 @@ fn context(home: &Path, client_binary: bool) -> Context {
     }
     Context {
         confined: false,
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        acceptance_roots: None,
         home: home.into(),
         managed: InstallerPaths::new(home.join("figcon managed")),
         supported: true,

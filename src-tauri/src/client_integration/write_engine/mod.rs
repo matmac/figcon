@@ -186,8 +186,49 @@ pub(super) enum Recovery {
 impl Engine {
     /// Only qualification tests can instantiate the engine. Production activation
     /// needs a separate policy/consent decision, trusted roots and runtime checks.
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    pub(super) fn isolated_acceptance(
+        trusted: &crate::acceptance::Roots,
+        home: &Path,
+        data: &Path,
+    ) -> Result<Self> {
+        let root = trusted.trusted_root().map_err(|_| Code::Unsafe)?;
+        let canonical_root = std::fs::canonicalize(root).map_err(|_| Code::Unsafe)?;
+        let canonical_home = std::fs::canonicalize(home).map_err(|_| Code::Unsafe)?;
+        let canonical_data = std::fs::canonicalize(data).map_err(|_| Code::Unsafe)?;
+        if root != canonical_root
+            || home != canonical_home
+            || data != canonical_data
+            || home != trusted.home
+            || data != trusted.data
+            || canonical_home != canonical_root.join("home")
+            || canonical_data != canonical_root.join("data")
+            || std::fs::symlink_metadata(home)
+                .map_err(|_| Code::Unsafe)?
+                .file_type()
+                .is_symlink()
+            || std::fs::symlink_metadata(data)
+                .map_err(|_| Code::Unsafe)?
+                .file_type()
+                .is_symlink()
+            || std::fs::symlink_metadata(root)
+                .map_err(|_| Code::Unsafe)?
+                .file_type()
+                .is_symlink()
+        {
+            return Err(Code::Unsafe);
+        }
+        Dir::open(home)?.private()?;
+        Dir::open(data)?.private()?;
+        Ok(Self {
+            home: home.into(),
+            data: data.into(),
+            plans: Mutex::new(HashMap::new()),
+            qualification_writes: true,
+        })
+    }
     #[cfg(test)]
-    pub(super) fn isolated(home: &Path, data: &Path) -> Result<Self> {
+    pub(super) fn isolated_test(home: &Path, data: &Path) -> Result<Self> {
         if !home.is_absolute() || !data.starts_with(home) || home == data {
             return Err(Code::Unsafe);
         }

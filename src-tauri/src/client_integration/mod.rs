@@ -30,6 +30,8 @@ fn production_search_roots(home: &std::path::Path) -> Vec<PathBuf> {
 struct DiscoveryEnvironment {
     home: PathBuf,
     confined: bool,
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    acceptance_roots: Option<crate::acceptance::Roots>,
     managed: InstallerPaths,
     supported: bool,
     claude_override: bool,
@@ -86,15 +88,24 @@ impl DiscoveryEnvironment {
     }
     fn isolated(roots: crate::acceptance::Roots) -> Self {
         let mut environment = Self::from_roots(
-            roots.home,
-            roots.data,
-            vec![roots.executables],
+            roots.home.clone(),
+            roots.data.clone(),
+            vec![roots.executables.clone()],
             cfg!(target_os = "macos"),
             false,
             false,
         );
         environment.confined = true;
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        {
+            environment.acceptance_roots = Some(roots);
+        }
         environment
+    }
+    fn is_confined_to(&self, roots: &crate::acceptance::Roots) -> bool {
+        self.confined
+            && self.home == roots.home
+            && self.managed.root == roots.data.join("figcon-installer")
     }
     fn from_roots(
         home: PathBuf,
@@ -107,6 +118,8 @@ impl DiscoveryEnvironment {
         Self {
             home,
             confined: false,
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            acceptance_roots: None,
             managed: InstallerPaths::new(data.join("figcon-installer")),
             supported,
             claude_override,
@@ -388,11 +401,20 @@ pub async fn prepare_client_configuration(
 ) -> Result<ConsentPreview, ConsentError> {
     #[cfg(target_os = "macos")]
     {
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        let acceptance_roots = crate::acceptance::roots(&app).ok().flatten();
         let context = Context::production(&app)
             .map_err(|_| ConsentError::new(ConsentCode::UnsupportedConfiguration))?;
         let service = service.inner().clone();
         let owner = window.label().to_owned();
         return tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            if let Some(roots) = acceptance_roots {
+                if !context.is_confined_to(&roots) {
+                    return Err(ConsentError::new(ConsentCode::ActivationDisabled));
+                }
+                return service.prepare_native_acceptance(context, client, &owner);
+            }
             service.prepare(context, client, &owner)
         })
         .await
@@ -413,11 +435,20 @@ pub async fn approve_client_configuration(
 ) -> Result<ApprovalReceipt, ConsentError> {
     #[cfg(target_os = "macos")]
     {
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        let acceptance_roots = crate::acceptance::roots(&app).ok().flatten();
         let context = Context::production(&app)
             .map_err(|_| ConsentError::new(ConsentCode::UnsupportedConfiguration))?;
         let service = service.inner().clone();
         let owner = window.label().to_owned();
         return tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            if let Some(roots) = acceptance_roots {
+                if !context.is_confined_to(&roots) {
+                    return Err(ConsentError::new(ConsentCode::ActivationDisabled));
+                }
+                return service.approve_native_acceptance(context, &plan_id, &owner);
+            }
             service.approve(context, &plan_id, &owner)
         })
         .await

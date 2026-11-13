@@ -65,6 +65,8 @@ fn fixture() -> Fixture {
         _temp: temp,
         context: Context {
             confined: false,
+            #[cfg(all(debug_assertions, target_os = "macos"))]
+            acceptance_roots: None,
             home,
             managed: paths,
             supported: true,
@@ -317,12 +319,17 @@ fn synthetic_approval_is_single_use_and_engine_gate_cannot_be_bypassed() {
     let f = fixture();
     let s = Service::default();
     let p = s
-        .prepare_inner(f.context.clone(), Client::CodexCli, "main", true)
+        .prepare_inner(f.context.clone(), Client::ClaudeCode, "main", true)
         .unwrap();
     let receipt = s
         .approve_inner(f.context.clone(), &p.plan_id, "main", true)
         .unwrap();
     assert_eq!(receipt.state, "verified");
+    assert!(
+        fs::read_to_string(f.context.config(Client::ClaudeCode))
+            .unwrap()
+            .contains("figcon-figma-console")
+    );
     assert_eq!(
         code(s.approve_inner(f.context.clone(), &p.plan_id, "main", true)),
         ConsentCode::ConsumedPlan
@@ -336,6 +343,19 @@ fn synthetic_approval_is_single_use_and_engine_gate_cannot_be_bypassed() {
         code(s.approve_inner(f.context.clone(), &p.plan_id, "main", true)),
         ConsentCode::ActivationDisabled
     );
+    assert!(!storage(&f).exists());
+}
+#[test]
+fn synthetic_codex_approval_is_rejected_before_any_write() {
+    let f = fixture();
+    let s = Service::default();
+    let config = f.context.config(Client::CodexCli);
+    let before = fs::read(&config).ok();
+    let error = s
+        .prepare_inner(f.context.clone(), Client::CodexCli, "main", true)
+        .unwrap_err();
+    assert_eq!(error.code, ConsentCode::ActivationDisabled);
+    assert_eq!(fs::read(&config).ok(), before);
     assert!(!storage(&f).exists());
 }
 #[test]
@@ -409,7 +429,7 @@ fn late_capacity_exhaustion_rejects_approval_and_retains_every_artifact() {
     let f = fixture();
     let s = Service::default();
     let p = s
-        .prepare_inner(f.context.clone(), Client::CodexCli, "main", true)
+        .prepare_inner(f.context.clone(), Client::ClaudeCode, "main", true)
         .unwrap();
     let root = storage(&f);
     fs::create_dir(&root).unwrap();
@@ -423,7 +443,7 @@ fn late_capacity_exhaustion_rejects_approval_and_retains_every_artifact() {
         code(s.approve_inner(f.context.clone(), &p.plan_id, "main", true)),
         ConsentCode::RecoveryCapacity
     );
-    assert!(!f.context.config(Client::CodexCli).exists());
+    assert!(!f.context.config(Client::ClaudeCode).exists());
     assert_eq!(fs::read_dir(root).unwrap().count(), 32);
 }
 
@@ -453,37 +473,82 @@ fn native_acceptance_consent_binds_isolated_targets_and_keeps_production_gate_cl
             "# private synthetic settings\n"
         };
         fs::write(&path, original).unwrap();
-        let plan = service
-            .prepare(context.clone(), client, "native-window")
-            .unwrap();
+        let plan = if client == Client::ClaudeCode {
+            service
+                .prepare_native_acceptance(context.clone(), client, "native-window")
+                .unwrap()
+        } else {
+            assert_eq!(
+                service
+                    .prepare_native_acceptance(context.clone(), client, "native-window")
+                    .unwrap_err()
+                    .code,
+                ConsentCode::ActivationDisabled
+            );
+            service
+                .prepare(context.clone(), client, "native-window")
+                .unwrap()
+        };
         assert!(PathBuf::from(&plan.proposed_executable).starts_with(&roots.data));
         assert!(PathBuf::from(&plan.proposed_arguments[0]).starts_with(&roots.data));
-        assert_eq!(
-            service
-                .approve(context.clone(), &plan.plan_id, "native-window")
-                .unwrap_err()
-                .code,
-            ConsentCode::ActivationDisabled
-        );
-        assert_eq!(fs::read(&path).unwrap(), original.as_bytes());
-        let plan = service
-            .prepare(context.clone(), client, "native-window")
-            .unwrap();
-        fs::write(
-            &path,
-            if client == Client::ClaudeCode {
-                "{\"synthetic\":1}"
-            } else {
-                "synthetic=1\n"
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            service
-                .approve(context.clone(), &plan.plan_id, "native-window")
-                .unwrap_err()
-                .code,
-            ConsentCode::StalePlan
-        );
+        if client == Client::ClaudeCode {
+            assert_eq!(
+                service
+                    .approve_native_acceptance(context.clone(), &plan.plan_id, "native-window")
+                    .unwrap()
+                    .state,
+                "verified"
+            );
+            let installed = fs::read(&path).unwrap();
+            assert_ne!(installed, original.as_bytes());
+            assert!(String::from_utf8_lossy(&installed).contains("figcon-figma-console"));
+        } else {
+            assert_eq!(
+                service
+                    .approve_native_acceptance(context.clone(), &plan.plan_id, "native-window")
+                    .unwrap_err()
+                    .code,
+                ConsentCode::ActivationDisabled
+            );
+            assert_eq!(fs::read(&path).unwrap(), original.as_bytes());
+        }
     }
+
+    // Use a separate, still-unregistered Claude file for stale-plan validation;
+    // the preceding acceptance case has successfully registered the primary one.
+    let stale_source = fixture();
+    let (_stale_temp, stale_session) = crate::acceptance::fixture();
+    let stale_roots = stale_session.roots().unwrap().unwrap();
+    fs::rename(
+        &stale_source.context.managed.root,
+        stale_roots.data.join("figcon-installer"),
+    )
+    .unwrap();
+    let candidate = stale_roots.executables.join("claude");
+    fs::write(&candidate, "never execute").unwrap();
+    fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
+    let stale_context = Context::isolated(stale_roots);
+    let stale_path = stale_context.config(Client::ClaudeCode);
+    let stale_storage = stale_context
+        .managed
+        .root
+        .parent()
+        .unwrap()
+        .join("client-config-transactions");
+    fs::write(&stale_path, "{} ").unwrap();
+    let stale_service = Service::default();
+    let stale_plan = stale_service
+        .prepare_native_acceptance(stale_context.clone(), Client::ClaudeCode, "native-window")
+        .unwrap();
+    let external = b"{\"synthetic\":1}";
+    fs::write(&stale_path, external).unwrap();
+    assert_eq!(
+        stale_service
+            .approve_native_acceptance(stale_context, &stale_plan.plan_id, "native-window")
+            .unwrap_err()
+            .code,
+        ConsentCode::StalePlan
+    );
+    assert_eq!(fs::read(stale_path).unwrap(), external);
+    assert!(!stale_storage.exists());
 }
