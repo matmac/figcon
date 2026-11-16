@@ -19,7 +19,7 @@ export interface ConnectionSnapshot {
   clients: ClientInspection[]; loaded: boolean; action: "idle" | "refreshing" | "preparing" | "approving" | "rejecting";
   selected: AiClient | null; plan: ConsentPreview | null; planState: "review" | "expired" | "stale";
   confirmed: boolean; secondsLeft: number; issue: Issue | null; inspectionIssue: Issue | null;
-  outcome: "blocked" | "rejected" | "expired" | "stale" | "error" | null;
+  outcome: "verified" | "blocked" | "rejected" | "expired" | "stale" | "error" | null;
   recovery: RecoveryUsage | null; recoveryIssue: boolean; prerequisites: Prerequisites;
 }
 export const initialConnectionSnapshot = (): ConnectionSnapshot => ({ clients: [], loaded: false, action: "idle", selected: null, plan: null, planState: "review", confirmed: false, secondsLeft: 0, issue: null, inspectionIssue: null, outcome: null, recovery: null, recoveryIssue: false, prerequisites: { state: "checking", missing: [] } });
@@ -106,9 +106,11 @@ export class ConnectionSession {
       // This method is called only by the explicit confirmed form submission.
       const receipt = await this.consent.approve(plan.planId);
       if (receipt.planId !== plan.planId || receipt.state !== "verified") throw { code: "operation-failed" };
-      // This build cannot legitimately write. Do not turn an unexpected success
-      // response into a connectivity claim or continue another operation.
-      this.patch({ plan: null, issue: "unexpected-response", outcome: "error" });
+      this.patch({ plan: null, issue: null, outcome: "verified" });
+      // Refresh disk inspection without discarding the verified operation result.
+      const [clients, recovery] = await Promise.allSettled([Promise.resolve().then(() => this.inspection.list()), Promise.resolve().then(() => this.consent.recovery())]);
+      this.patch({ ...(clients.status === "fulfilled" ? { clients: clients.value, inspectionIssue: null } : { inspectionIssue: safeIssue(clients.reason) }),
+        recovery: recovery.status === "fulfilled" ? recovery.value : null, recoveryIssue: recovery.status === "rejected" });
     } catch (error) { this.failure(error, true); }
     finally { this.patch({ action: "idle" }); }
   };

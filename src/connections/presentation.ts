@@ -6,15 +6,16 @@ export function clientStatus(client: ClientInspection): { title: string; body: s
   if (client.detection === "ambiguous") return { title: "More than one installation", body: "Choose which installation to use before connecting. Automatic selection isn’t available yet.", tone: "warning" };
   if (client.detection === "unsupported-platform") return { title: "Unavailable on this platform", body: "Client setup currently supports macOS.", tone: "warning" };
   if (!["missing", "readable"].includes(client.configuration)) return { title: "Settings need review", body: client.configuration === "malformed" ? "The settings file couldn’t be understood. Figcon won’t repair or replace it." : "These settings are unsupported, unsafe or unavailable. Figcon will leave them in place.", tone: "warning" };
+  if (client.ownership === "verified" && client.registration === "matching-external") return { title: "Managed by Figcon", body: "The registration and Figcon ownership receipt are verified. A live Figma connection hasn’t been checked.", tone: "neutral" };
   if (client.registration === "matching-external" || client.registration === "external") return { title: "Configured outside Figcon", body: "A Figma Console registration already exists. Figcon won’t adopt, replace or remove it. A live connection hasn’t been checked.", tone: "neutral" };
   if (client.registration === "conflict" || client.registration === "unsupported") return { title: "Existing registration needs review", body: "The proposed name or settings are already in use. Figcon won’t overwrite them.", tone: "warning" };
   if (client.registration === "unknown") return { title: "Registration couldn’t be checked", body: "Refresh to inspect again. No changes will be made.", tone: "warning" };
   return { title: "Not configured", body: "Review a proposal for using Figcon’s private Figma Console installation.", tone: "neutral" };
 }
 export const warnings: Record<string, string> = {
-  "production-disabled": "Client configuration changes are disabled in this version.",
+  "production-disabled": "Production client configuration changes remain disabled.",
   "external-writer-race": "Other apps can change their settings while Figcon is checking them. Changed settings require a new review.",
-  "backup-required-for-existing-file": "A future enabled change would keep an exact private backup of existing settings, which may include sensitive information.",
+  "backup-required-for-existing-file": "An approved change requires an exact private backup of existing settings, which may include sensitive information.",
   "recovery-files-retained": "Recovery files are kept for manual review. Figcon never deletes them automatically.",
   "effective-configuration-unknown": "Project or organisation settings may override this user-wide registration. A registration alone does not confirm a Figma connection.",
 };

@@ -100,6 +100,13 @@ impl Session {
         Ok(())
     }
 }
+impl Roots {
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    pub(crate) fn trusted_root(&self) -> Result<&std::path::Path, &'static str> {
+        self.anchor.verify()?;
+        Ok(&self.anchor.root)
+    }
+}
 pub(crate) fn roots(app: &tauri::AppHandle) -> Result<Option<Roots>, &'static str> {
     app.try_state::<Session>()
         .ok_or("Discovery environment unavailable")?
@@ -126,7 +133,7 @@ mod macos {
     const MARKER: &str = "figcon-native-acceptance-v1\n";
     #[derive(Clone)]
     pub(super) struct Anchor {
-        root: PathBuf,
+        pub(super) root: PathBuf,
         device: u64,
         inode: u64,
     }

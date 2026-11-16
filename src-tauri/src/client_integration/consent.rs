@@ -46,6 +46,13 @@ mod macos {
     const MAX_PLANS: usize = 16;
     const MAX_PLAN_BYTES: usize = 64 * 1024;
     const MAX_REGISTRY_BYTES: usize = 1024 * 1024;
+    enum EngineMode {
+        ReadOnly,
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        Acceptance,
+        #[cfg(test)]
+        SyntheticTest,
+    }
     #[derive(Clone, Copy)]
     enum State {
         Pending,
@@ -149,14 +156,53 @@ mod macos {
             client: Client,
             owner: &str,
         ) -> Result<ConsentPreview, ConsentError> {
-            self.prepare_inner(context, client, owner, false)
+            self.prepare_with_engine(context, client, owner, EngineMode::ReadOnly)
         }
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        pub(in crate::client_integration) fn prepare_native_acceptance(
+            &self,
+            context: Context,
+            client: Client,
+            owner: &str,
+        ) -> Result<ConsentPreview, ConsentError> {
+            if !context.confined || client != Client::ClaudeCode {
+                return Err(err(ConsentCode::ActivationDisabled));
+            }
+            self.prepare_acceptance_inner(context, owner)
+        }
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        fn prepare_acceptance_inner(
+            &self,
+            context: Context,
+            owner: &str,
+        ) -> Result<ConsentPreview, ConsentError> {
+            self.prepare_with_engine(context, Client::ClaudeCode, owner, EngineMode::Acceptance)
+        }
+        #[cfg(test)]
         fn prepare_inner(
             &self,
             context: Context,
             client: Client,
             owner: &str,
             synthetic: bool,
+        ) -> Result<ConsentPreview, ConsentError> {
+            self.prepare_with_engine(
+                context,
+                client,
+                owner,
+                if synthetic {
+                    EngineMode::SyntheticTest
+                } else {
+                    EngineMode::ReadOnly
+                },
+            )
+        }
+        fn prepare_with_engine(
+            &self,
+            context: Context,
+            client: Client,
+            owner: &str,
+            mode: EngineMode,
         ) -> Result<ConsentPreview, ConsentError> {
             if owner.len() > 256 {
                 return Err(err(ConsentCode::NotOwner));
@@ -168,17 +214,25 @@ mod macos {
             let _working = Working(self);
             prerequisites(&context, client)?;
             let data = roots(&context)?;
-            let engine = if synthetic {
+            let engine = match mode {
+                EngineMode::ReadOnly => Engine::preview_only(&context.home, &data).map_err(map)?,
+                #[cfg(all(debug_assertions, target_os = "macos"))]
+                EngineMode::Acceptance if context.confined && client == Client::ClaudeCode => {
+                    Engine::isolated_acceptance(
+                        context
+                            .acceptance_roots
+                            .as_ref()
+                            .ok_or_else(|| err(ConsentCode::ActivationDisabled))?,
+                        &context.home,
+                        &data,
+                    )
+                    .map_err(map)?
+                }
                 #[cfg(test)]
-                {
-                    Engine::isolated(&context.home, &data).map_err(map)?
+                EngineMode::SyntheticTest if client == Client::ClaudeCode => {
+                    Engine::isolated_test(&context.home, &data).map_err(map)?
                 }
-                #[cfg(not(test))]
-                {
-                    return Err(err(ConsentCode::ActivationDisabled));
-                }
-            } else {
-                Engine::preview_only(&context.home, &data).map_err(map)?
+                _ => return Err(err(ConsentCode::ActivationDisabled)),
             };
             let recovery = engine.recovery_usage();
             if recovery.state != RecoveryState::Available {
@@ -215,6 +269,7 @@ mod macos {
                 expires_at_unix_ms: now + seconds * 1000,
                 expires_in_seconds: seconds,
                 production_mutation_enabled: false,
+                isolated_acceptance: context.isolated_claude_acceptance(client),
                 recovery,
             };
             self.inner
@@ -244,6 +299,25 @@ mod macos {
             owner: &str,
         ) -> Result<ApprovalReceipt, ConsentError> {
             self.approve_inner(context, id, owner, false)
+        }
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        pub(in crate::client_integration) fn approve_native_acceptance(
+            &self,
+            context: Context,
+            id: &str,
+            owner: &str,
+        ) -> Result<ApprovalReceipt, ConsentError> {
+            let trusted = context
+                .acceptance_roots
+                .as_ref()
+                .ok_or_else(|| err(ConsentCode::ActivationDisabled))?;
+            trusted
+                .trusted_root()
+                .map_err(|_| err(ConsentCode::ActivationDisabled))?;
+            if !context.is_confined_to(trusted) {
+                return Err(err(ConsentCode::ActivationDisabled));
+            }
+            self.approve_inner(context, id, owner, true)
         }
         fn approve_inner(
             &self,
@@ -281,11 +355,17 @@ mod macos {
             if q.engine.recovery_usage().state != RecoveryState::Available {
                 return Err(err(ConsentCode::RecoveryCapacity));
             }
-            // There is no production branch that invokes Engine::apply. No env,
-            // frontend setting, or runtime boolean can activate configuration writes.
+            // Normal approval is disabled. Debug native acceptance and internal
+            // tests can use only the engine capability bound during preparation.
             if synthetic {
-                #[cfg(test)]
+                #[cfg(any(test, all(debug_assertions, target_os = "macos")))]
                 {
+                    // The isolated qualification path intentionally supports only
+                    // Claude Code. Keep this check at the mutation boundary so a
+                    // future caller cannot accidentally enable Codex writes.
+                    if q.plan.client() != Client::ClaudeCode {
+                        return Err(err(ConsentCode::ActivationDisabled));
+                    }
                     q.engine.apply(&q.plan).map_err(map)?;
                     return Ok(ApprovalReceipt {
                         plan_id: id.into(),

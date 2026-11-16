@@ -1,5 +1,138 @@
 # Native AI client integration acceptance
 
+## Focused UI correction acceptance — 2026-11-16
+
+**PASS for the three corrected Claude connection UI behaviors.** This tested the
+uncommitted UI/receipt-recognition changes on `feat/client-activation`, based on
+`e155d024`. Production writes remain disabled. No source code changed during this
+run; only this report was updated. Earlier results below remain historical.
+
+A fresh private root was created by `scripts/prepare-native-acceptance.py`, with
+synthetic Claude/Codex candidates and configs. Managed Node 24.22.2 and MCP 1.46.0
+were copied from the preceding isolated installation; installation was not repeated.
+The documented debug launch encountered Vite localhost EPERM, then succeeded with
+host permission. Native automation used the documented temporary app wrapper with
+an identical freshly built debug binary and both acceptance variables. No mock
+backend or frontend responses were used.
+
+### Actual observations
+
+| Check | Result |
+| --- | --- |
+| Explicit approval | PASS: expanded details showed exact private Node/MCP paths and user scope; confirmation checkbox enabled the separate Confirm approval action. |
+| Success notice | PASS: actual backend write produced **Registration verified** with the statement that registration does not confirm a running client or Figma connection. No unexpected-response error appeared. |
+| Consent wording | PASS: banner said **Isolated acceptance · Synthetic Claude settings only**; checkbox approved only synthetic Claude settings; warning/footer explicitly kept production and Codex activation disabled. |
+| Receipt and backup | PASS: exact synthetic backup, correct registration, receipt digest/verified marker, prepared/applying bindings, current config hash and identity, registration digest and private 0700/0600 artifact modes checked after restart. |
+| Ownership refresh | PASS: completed refresh displayed **Managed by Figcon**, verified receipt text and disabled duplicate review. |
+| Native Reload | PASS: actual WKWebView context-menu Reload reset navigation to Setup; returning to AI clients completed fresh inspection and showed **Managed by Figcon**. |
+| Process restart | PASS: stopped the owned debug process and explicitly relaunched it with the same validated root; fresh inspection again showed **Managed by Figcon**. |
+| Codex disabled | PASS: Review Codex returned **Changes are blocked in this version**; no Codex plan/write was enabled, and its synthetic config stayed byte-identical. |
+
+Seven native screenshots and AX snapshots are retained locally under this run's
+private evidence directory, listed in `evidence/screenshots.json`. In particular,
+`02-confirmed-submission.ax.txt` captured the **Registration verified** notice;
+`05-reload-managed` and `06-restart-managed` record ownership reconstruction, and
+`07-restart-managed-cards` visibly captures the managed card. `verification.json`
+and the retained verification script record disk checks. Exact machine-specific
+paths, screenshots, copies of configurations and temporary binaries are excluded
+from Git. All transaction and recovery evidence remains retained.
+
+### Security and limits
+
+Hash-only before/after checks found both real user Claude and Codex configuration
+files unchanged. Their contents were not printed or copied into fixtures; only
+private digests were retained for comparison. Synthetic Codex bytes were unchanged,
+and exactly one Claude transaction was present. No client CLI or MCP server was
+executed by this acceptance procedure. The backend production mutation flag remains
+false. The owned app and Vite session were stopped afterward.
+
+The native run exercised a successful verified write, not an injected uncertain
+write. The existing focused frontend regression **uncertain approval never reports
+registration success** covers that failure distinction; it was not substituted for
+an observed native uncertainty scenario. No unrelated full validation was repeated.
+The temporary app wrapper was needed because automation cannot select the unbundled
+executable. One transient ScreenCaptureKit observation error succeeded on retry.
+
+These checks demonstrate the requested isolated behavior and byte preservation,
+not an exhaustive transient-write/OS-access audit, production activation, live
+Claude/Figma connectivity, Windows execution, release packaging or full VoiceOver
+certification. No new failure was found within this focused acceptance scope.
+
+
+## Isolated Claude write-flow acceptance — recorded 2026-11-15
+
+Commit tested: `e155d024`, macOS arm64 debug Tauri application. **Backend isolated
+registration passed; complete connection UI acceptance failed.** Production
+configuration writes remain disabled. No source changes were made during this run.
+
+A fresh private root was created using `scripts/prepare-native-acceptance.py`.
+Synthetic client candidates/configurations came from that script. The root's
+managed runtime/MCP were copied, preserving runtime aliases, from the preceding
+isolated real-installation evidence (Node 24.22.2, MCP 1.46.0); this run did not
+repeat the installation. No real user config was copied or used. The documented
+`npm run tauri dev` launch first failed with localhost EPERM, then succeeded with
+host permission. Native automation could not select the unbundled executable,
+so the identical debug executable was launched in the previously documented
+temporary app wrapper with both acceptance variables bound. Real backend and
+frontend code were used, without mock responses or bypasses.
+
+### Observed results
+
+- Claude Code and Codex were detected from passive synthetic candidates. Both
+  started unregistered. No client CLI or MCP server was launched by the test.
+- “Review Claude Code” produced the backend-owned add-only user plan for
+  `figcon-figma-console`. Expanded details showed the exact root-local private
+  `runtime/bin/node` executable and MCP `dist/local.js` argument.
+- The actual action is labelled **Confirm approval**, not Connect. It was disabled
+  until the checkbox was selected. Clicking it invoked the isolated write engine
+  and created the expected synthetic Claude registration, preserving the unrelated
+  synthetic setting. No implicit approval was used.
+- Exact backup bytes matched the original synthetic JSON. Transaction directory
+  mode was 0700; backup, journals, receipt and verified marker were 0600. Evidence
+  inspection checked receipt digest against `verified.json`, prepared/applying
+  binding agreement, current config hash/identity, exact registration digest and
+  managed paths after restart. All passed. These checks inspect persisted evidence;
+  the desktop exposes no command to invoke `Engine::verify_receipt` directly.
+- **UI defect:** a legitimate verified approval returns “The response needs review”.
+  `src/connections/session.ts` deliberately maps even a verified response to
+  `unexpected-response`; no successful registration result is presented.
+- **UI wording defect:** the checkbox, warning banner and footer still promise
+  changes are blocked, although isolated acceptance now permits this change.
+- Refresh, actual native context-menu Reload, and explicit isolated app restart
+  rediscovered the persisted entry and disabled repeat review. However the status
+  was **Configured outside Figcon**, because passive ownership inspection does not
+  load engine receipts. Persistence passed; Figcon ownership rediscovery did not.
+- Codex review returned “Changes are blocked in this version”. Its configuration
+  stayed byte-identical and only one Claude transaction was created.
+
+### Security evidence and limits
+
+All backend discovery/config/data paths were selected through the validated
+acceptance environment. The production mutation flag remained false; no production
+activation or arbitrary frontend paths were introduced. No real client settings
+were read as fixtures or intentionally written. This is application-level isolation
+and synthetic byte evidence, not an exhaustive OS filesystem/exec audit. Native
+framework bookkeeping and unrelated user apps were not audited or altered.
+
+Invalid/expired-plan behavior was checked with **three focused Rust tests**, all
+passing: `expired_altered_replayed_and_foreign_plans_are_rejected`,
+`plans_are_window_owned_reject_tampering_and_expire_without_sleep`, and
+`synthetic_approval_is_single_use_and_engine_gate_cannot_be_bypassed`.
+These are automated synthetic checks, not native expired-ID submissions; the native
+run approved a valid live plan. No unrelated full validation was repeated.
+
+Six screenshots, AX snapshots, original synthetic configs, focused-test output and
+`verification.json` are retained locally under this run's private evidence directory.
+Exact machine-specific paths are omitted here. Screenshots/artifacts are not included
+in Git. The app and owned Vite session were stopped; staging and transaction evidence
+were preserved. No automatic rollback or cleanup was performed.
+
+Remaining blockers are accurate acceptance-mode consent wording, handling verified
+approval in the UI, and trusted receipt-based ownership rediscovery. Full VoiceOver,
+release packaging, Windows execution and exhaustive access auditing were not tested.
+No code fix, commit, push or PR was made as part of this acceptance task.
+
+
 ## Fresh isolated acceptance — 2026-11-12
 
 **PASS for the exercised macOS arm64 flows; ready for PR #6 checkpoint review.**

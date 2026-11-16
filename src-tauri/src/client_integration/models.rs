@@ -42,6 +42,7 @@ wire_enum!(RegistrationStatus {
     Unknown
 });
 wire_enum!(OwnershipStatus {
+    Verified,
     Absent,
     Mismatched,
     Unverified
@@ -74,6 +75,7 @@ pub struct Inspection {
     pub configuration_location: String,
     pub registration: RegistrationStatus,
     pub ownership: OwnershipStatus,
+    pub isolated_acceptance: bool,
     pub warnings: Vec<Warning>,
 }
 #[derive(Clone, Debug, Serialize)]
