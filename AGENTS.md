@@ -7,7 +7,7 @@ Figcon is an MIT-licensed, macOS-first desktop application for designers to inst
 - `src/` contains the React/TypeScript frontend, built with Vite. Use Tauri commands for backend operations; keep privileged filesystem, download, and process operations in Rust.
 - `src-tauri/src/lib.rs` registers Tauri commands. `environment/` detects the platform and clients; `installer/` owns installation paths, discovery, status, download verification, extraction, staging, validation, activation, and cleanup.
 - `src-tauri/tauri.conf.json` and `src-tauri/capabilities/` define desktop integration and permissions. Keep permissions limited to the work required.
-- macOS is the current implementation target. Windows product support is deferred, but preserve the existing macOS/Windows CI matrix and Windows compilation/build behavior. Guard platform-specific APIs and tests appropriately; unsupported operations must fail clearly without side effects.
+- macOS is the initial release target and the only automatic CI platform. Windows product support and CI validation are deferred; preserve Windows-compatible source code, dependencies, tests, and compilation/build behavior. Guard platform-specific APIs and tests appropriately; unsupported operations must fail clearly without side effects.
 
 ## Git and scope discipline
 
@@ -50,7 +50,7 @@ cargo check --locked --manifest-path src-tauri/Cargo.toml
 npm run tauri build -- --no-bundle
 ```
 
-Use `npm ci` when dependency installation is needed. The frontend build runs TypeScript checking and Vite; `npm run test:installer` checks the installer transport and state reconciliation. CI runs Rust formatting checks, Rust tests, backend checks, and frontend/desktop builds on macOS and Windows. Never run an automatic formatter over unrelated or pre-existing work.
+Use `npm ci` when dependency installation is needed. The frontend build runs TypeScript checking and Vite; `npm run test:installer` checks the installer transport and state reconciliation. CI runs frontend tests, Rust formatting checks, Rust tests, backend checks, and frontend/desktop builds on macOS. Windows validation is postponed and must not be a required merge check. Never run an automatic formatter over unrelated or pre-existing work.
 
 For documentation-only work, inspect the document and resulting diff; builds are unnecessary unless the documentation change affects executable behavior. Report which checks ran, their results, and anything skipped or blocked. Distinguish existing failures from regressions without changing unrelated work.
 
