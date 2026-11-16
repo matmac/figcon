@@ -536,6 +536,36 @@ impl Engine {
         dir.private()?;
         Ok(dir)
     }
+    /// Passive, bounded ledger discovery; matching argv alone never proves ownership.
+    pub(super) fn has_verified_receipt(&self, client: Client) -> bool {
+        let inspect = || -> Result<bool> {
+            let root = Dir::open(&self.data)?.existing_child("client-config-transactions")?;
+            root.private()?;
+            let names = root.names(4096)?;
+            let ids: Vec<_> = names
+                .iter()
+                .filter(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+                .collect();
+            if ids.len() > 32 {
+                return Err(Code::Capacity);
+            }
+            for id in ids {
+                let artifacts = self.transaction(id)?;
+                let Some(raw) = artifacts.read("receipt.json")? else {
+                    continue;
+                };
+                let receipt: Receipt = match serde_json::from_str(&raw.text) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                if receipt.binding.client == client && self.verify_receipt(id).is_ok() {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        };
+        inspect().unwrap_or(false)
+    }
     pub fn verify_receipt(&self, id: &str) -> Result<()> {
         let artifacts = self.transaction(id)?;
         let raw = artifacts.read("receipt.json")?.ok_or(Code::ReceiptStale)?;

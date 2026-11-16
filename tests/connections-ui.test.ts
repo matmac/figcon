@@ -142,3 +142,31 @@ test("native navigation and confirmation controls expose keyboard and focus sema
   const h = harness(); await h.session.refresh(); await h.session.prepare("claude-code"); const html = screen(h.session.getSnapshot());
   assert.match(html, /<form/); assert.match(html, /type="checkbox" required=""/); assert.match(html, /type="submit" disabled=""/); assert.match(html, /tabindex="-1"/); assert.match(html, /Escape declines/); h.session.dispose();
 });
+
+test("verified approval reports registration success and reconciles ownership", async () => {
+  const h = harness(); await h.session.refresh(); await h.session.prepare("claude-code");
+  h.sources.approve = async () => ({ planId: preview().planId, state: "verified" });
+  h.sources.list = async () => [{ ...inspection(), registration: "matching-external", ownership: "verified" }];
+  h.session.confirm(true); await h.session.approve();
+  const state = h.session.getSnapshot(); assert.equal(state.outcome, "verified"); assert.equal(state.issue, null);
+  const html = screen(state); assert.match(html, /Registration verified/); assert.match(html, /Managed by Figcon/);
+  assert.doesNotMatch(html, /The response needs review|Configured outside Figcon/); assert.match(html, /does not confirm a running client/); h.session.dispose();
+});
+test("uncertain approval never reports registration success", async () => {
+  const h = harness(); await h.session.refresh(); await h.session.prepare("claude-code");
+  h.sources.approve = async () => { throw { code: "uncertain" }; };
+  h.session.confirm(true); await h.session.approve();
+  assert.equal(h.session.getSnapshot().outcome, "error");
+  assert.match(screen(h.session.getSnapshot()), /outcome needs manual review/);
+  assert.doesNotMatch(screen(h.session.getSnapshot()), /Registration verified/); h.session.dispose();
+});
+test("consent copy distinguishes isolated Claude from disabled production and Codex", async () => {
+  const h = harness(); await h.session.refresh(); await h.session.prepare("claude-code");
+  assert.match(screen(h.session.getSnapshot()), /production changes remain disabled/);
+  h.sources.list = async () => [{ ...inspection(), isolatedAcceptance: true }, inspection("codex-cli")];
+  h.sources.prepare = async () => ({ ...preview(), isolatedAcceptance: true });
+  await h.session.refresh(); await h.session.prepare("claude-code");
+  const html = screen(h.session.getSnapshot()); assert.match(html, /Synthetic Claude settings only/);
+  assert.match(html, /approve writing only the synthetic Claude Code settings/); assert.match(html, /Codex.*production changes remain disabled/);
+  h.session.dispose();
+});

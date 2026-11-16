@@ -502,6 +502,61 @@ fn native_acceptance_consent_binds_isolated_targets_and_keeps_production_gate_cl
             let installed = fs::read(&path).unwrap();
             assert_ne!(installed, original.as_bytes());
             assert!(String::from_utf8_lossy(&installed).contains("figcon-figma-console"));
+            assert_eq!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            let transaction = roots
+                .data
+                .join("client-config-transactions")
+                .join(&plan.plan_id);
+            let receipt_path = transaction.join("receipt.json");
+            let receipt_saved = transaction.join("receipt.saved");
+            fs::rename(&receipt_path, &receipt_saved).unwrap();
+            assert_ne!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            assert_eq!(
+                inspect(&context, client).registration,
+                RegistrationStatus::MatchingExternal
+            );
+            fs::rename(&receipt_saved, &receipt_path).unwrap();
+            let marker = transaction.join("verified.json");
+            let saved = transaction.join("verified.saved");
+            let marker_bytes = fs::read(&marker).unwrap();
+            fs::rename(&marker, &saved).unwrap();
+            assert_ne!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            assert_eq!(
+                inspect(&context, client).registration,
+                RegistrationStatus::MatchingExternal
+            );
+            fs::rename(&saved, &marker).unwrap();
+            fs::write(&marker, "invalid marker").unwrap();
+            assert_ne!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            fs::write(&marker, marker_bytes).unwrap();
+            assert_eq!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            let mut modified = installed.clone();
+            modified.push(b' ');
+            fs::write(&path, &modified).unwrap();
+            assert_eq!(
+                inspect(&context, client).registration,
+                RegistrationStatus::MatchingExternal
+            );
+            assert_ne!(
+                inspect(&context, client).ownership,
+                crate::client_integration::OwnershipStatus::Verified
+            );
+            assert_eq!(fs::read(&path).unwrap(), modified);
         } else {
             assert_eq!(
                 service

@@ -86,6 +86,7 @@ pub struct ConsentPreview {
     pub expires_at_unix_ms: u64,
     pub expires_in_seconds: u64,
     pub production_mutation_enabled: bool,
+    pub isolated_acceptance: bool,
     pub recovery: RecoveryUsage,
 }
 #[derive(Clone, Debug, Serialize)]

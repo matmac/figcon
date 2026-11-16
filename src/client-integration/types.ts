@@ -3,7 +3,7 @@ export type AiClient = "claude-code" | "codex-cli";
 export type DetectionStatus = "missing" | "detected" | "ambiguous" | "unsupported-platform";
 export type ConfigurationStatus = "missing" | "readable" | "malformed" | "inaccessible" | "unsafe" | "unsupported-location" | "unsupported-platform";
 export type RegistrationStatus = "not-registered" | "matching-external" | "external" | "conflict" | "unsupported" | "unknown";
-export type OwnershipStatus = "absent" | "mismatched" | "unverified";
+export type OwnershipStatus = "verified" | "absent" | "mismatched" | "unverified";
 export type InspectionWarning = "registration-conflict" | "read-only" | "client-missing" | "client-ambiguous" | "unsupported-platform" | "unsupported-location" | "malformed-configuration" | "inaccessible-configuration" | "unsafe-configuration" | "unsupported-registration" | "additional-registration" | "possible-shadowing" | "effective-configuration-unknown" | "ownership-unverified" | "managed-installation-unavailable";
 export interface ClientInspection {
   client: AiClient;
@@ -13,6 +13,7 @@ export interface ClientInspection {
   configurationLocation: string;
   registration: RegistrationStatus;
   ownership: OwnershipStatus;
+  isolatedAcceptance?: boolean;
   warnings: InspectionWarning[];
 }
 export interface ConfigurationPreview {
@@ -57,6 +58,7 @@ export interface ConsentPreview {
   expiresAtUnixMs: number;
   expiresInSeconds: number;
   productionMutationEnabled: boolean;
+  isolatedAcceptance?: boolean;
   recovery: RecoveryUsage;
 }
 export interface ApprovalReceipt { planId: string; state: "verified" | "rejected" }

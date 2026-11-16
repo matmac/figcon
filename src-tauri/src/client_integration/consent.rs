@@ -269,6 +269,7 @@ mod macos {
                 expires_at_unix_ms: now + seconds * 1000,
                 expires_in_seconds: seconds,
                 production_mutation_enabled: false,
+                isolated_acceptance: context.isolated_claude_acceptance(client),
                 recovery,
             };
             self.inner

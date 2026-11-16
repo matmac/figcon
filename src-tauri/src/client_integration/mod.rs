@@ -42,6 +42,21 @@ struct DiscoveryEnvironment {
 }
 type Context = DiscoveryEnvironment;
 impl DiscoveryEnvironment {
+    fn isolated_claude_acceptance(&self, client: Client) -> bool {
+        #[cfg(all(debug_assertions, target_os = "macos"))]
+        {
+            return client == Client::ClaudeCode
+                && self
+                    .acceptance_roots
+                    .as_ref()
+                    .is_some_and(|r| self.is_confined_to(r) && r.trusted_root().is_ok());
+        }
+        #[cfg(not(all(debug_assertions, target_os = "macos")))]
+        {
+            let _ = client;
+            false
+        }
+    }
     fn retained_bytes(&self) -> usize {
         [
             &self.home,
@@ -320,6 +335,18 @@ fn inspect(context: &Context, client: Client) -> Inspection {
     if registration == RegistrationStatus::Conflict {
         warnings.push(Warning::RegistrationConflict);
     }
+    let mut ownership = ownership::assess(None, client);
+    #[cfg(target_os = "macos")]
+    if client == Client::ClaudeCode && registration == RegistrationStatus::MatchingExternal {
+        if let Some(data) = context.managed.root.parent() {
+            if write_engine::Engine::preview_only(&context.home, data)
+                .is_ok_and(|engine| engine.has_verified_receipt(client))
+            {
+                ownership = OwnershipStatus::Verified;
+                warnings.retain(|warning| *warning != Warning::OwnershipUnverified);
+            }
+        }
+    }
     Inspection {
         client,
         client_name: client.name().into(),
@@ -331,7 +358,8 @@ fn inspect(context: &Context, client: Client) -> Inspection {
         }
         .into(),
         registration,
-        ownership: ownership::assess(None, client),
+        ownership,
+        isolated_acceptance: context.isolated_claude_acceptance(client),
         warnings,
     }
 }
